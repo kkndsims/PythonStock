@@ -9,26 +9,25 @@ from   plateApi    import *
     
 if __name__ == '__main__' :
     endDate             = getWorkDay(datetime.datetime.now())
-    #endDate             = '20220216'
+    befDate             = getLastWorkDay(datetime.datetime.now(), endDate)
+    #endDate             = '20220930'
     
     getStockCode(endDate)       #获取股票中文名称
     #getPlateCode()              #获取板块中文名称
     
     setUpdateDaysEn (True)      #使能处理日线数据    
-    #setUpdateHalfEn (True)      #使能处理half数据
+    #setUpdateHalfEn (False)      #使能处理half数据
     #setUpdateWeekEn (True)      #使能处理周线数据
     procInitStockData(endDate)  #处理half/days/week数据
     
     testList            = []
-    #testList            = ['SH603538']  #上证
-    #testList            = ['SZ000759']  #深证
+    #testList            = ['SH600158']  #上证
+    #testList            = ['SZ000513']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         
     testList            = []
-    #testList            = ['SH880423']     #板块
-    #testFlag            = True if testList else False
-    #getDaysReplay(endDate, codeList + plateList, codeName + plateName)
+    #getDaysReplay(endDate, codeList + plateList, codeName, plateName)
     #getPlateImage(endDate, plateList, plateName, testFlag, testList)
       
     sendFlag            = True
@@ -36,7 +35,7 @@ if __name__ == '__main__' :
     if sendFlag and not testFlag  :
         print("\n%s :: line %3d : ############### 发送邮件 ###############"\
         %("comDef", sys._getframe().f_lineno))            
-        sendMail(endDate)
+        sendMail(endDate, befDate)
     
     print("\n%s :: line %3d : ############### 所有工作处理完成 ###############"\
     %("comDef", sys._getframe().f_lineno))

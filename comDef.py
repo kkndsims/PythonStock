@@ -25,9 +25,9 @@ pd.set_option('display.max_rows',    500)
 pd.set_option('display.width',       1000)
  
 workpath                = "D:\\PythonWorkSpace\\PythonStock3.7\\"   #工作路径
-dayipath                = "C:\\new_tdx\\T0001\\export\\"            #日线原始数据 
-basepath                = "C:\\new_tdx\\T0002\\export\\"            #基础原始数据
-minipath                = "C:\\new_tdx\\T0003\\export\\"            #5分钟原始数据
+dayipath                = "C:\\new_tdx\\T0001\\export\\d\\"         #日线原始数据
+minipath                = "C:\\new_tdx\\T0001\\export\\m\\"         #5分钟原始数据
+basepath                = "C:\\new_tdx\\T0001\\export\\"            #基础原始数据
 
 halfpath                = workpath + "HalfPath\\"                   #half输出
 dayspath                = workpath + "DaysPath\\"                   #日线输出
@@ -38,6 +38,7 @@ codeList                = []
 codeName                = []
 
 baseInfo                = pd.DataFrame()
+baseFile                = ""
 amountUnit              = 100000000                                 #1亿
 volumeUnit              = 1000000                                   #1万手
 
@@ -58,12 +59,22 @@ def getWorkDay(now):
     %("comDef", sys._getframe().f_lineno, weekday))
     day                 = day - (lastweek - 4) if lastweek > 4 else day  #weekday 0 is sunday, 4 is friday        
     endDate             = str(year) + str(month).zfill(2) + str(day).zfill(2)
+    print("%s :: line %3d : ############### lastday = %s"\
+    %("comDef", sys._getframe().f_lineno, endDate))
+    return endDate
+def getLastWorkDay(now, endDate):    
+    year                = int(endDate[0:4])
+    month               = int(endDate[4:6])
+    day                 = int(endDate[6:8])
+    lastweek            = calendar.weekday(year, month, day) 
+    day                 = day - 1 if lastweek > 0 else day - 2   
+    endDate             = str(year) + str(month).zfill(2) + str(day).zfill(2)
     print("%s :: line %3d : ############### workday = %s"\
     %("comDef", sys._getframe().f_lineno, endDate))
     return endDate
 ############################# 获取股票code/name ######################
 def getStockCode(endDate) : 
-    global codeList, codeName, baseInfo
+    global codeList, codeName, baseInfo, baseFile
     # 获取基础信息
     find                    = False
     for i in os.listdir(basepath):
@@ -74,6 +85,7 @@ def getStockCode(endDate) :
             codeName        = baseInfo['名称'].tolist()
             codeList        = baseInfo['代码'].tolist()
             find            = True
+            baseFile        = base
             print("%s :: line %3d : ############### allNum  = %d\n"\
             %("comDef", sys._getframe().f_lineno, len(baseInfo))) 
             break
@@ -84,8 +96,14 @@ def getStockCode(endDate) :
     # 获取代码, 原始code格式 '="000001"'
     for i in os.listdir(dayipath):
         char                = '="' + str(i)[2:] + '"'
-        index               = codeList.index(char)
-        codeList[index]     = i
+        if char in codeList:
+            index               = codeList.index(char)
+            codeList[index]     = i
+        else:
+            print("%s :: line %d : Error! code : %s's not exist" \
+            %("comDef", sys._getframe().f_lineno, char))
+            #sys.exit(0)
+
 ############################# 设置half/日线/周线使能 ##################
 def setUpdateHalfEn(flag):
     global drawType
@@ -183,8 +201,8 @@ def getUpdateMap(endDate, code, name, tp) :
             data            = data[~data['volume'].isin([0])]
             if tp == 'days':
                 data['grow']    = round(((data['close'] / data['close' ].shift(1) - 1) * 100), 2)
-                data['rate']    = round((data['amount'] / data['amount'].shift(1)), 1)
-                data['amount']  = round( data['amount'] / amountUnit, 2).round(decimals=1)
+                data['rate']    = round((data['amount'] / data['amount'].shift(1)), 2)
+                data['amount']  = round( data['amount'] / amountUnit, 2).round(decimals=2)
                 data['volume']  = data['volume'] // volumeUnit
                 data            = getChangeRate(name, data)
                 data.to_csv(ofile, index=False)
@@ -214,6 +232,7 @@ def getMergData(code, name, endDate, otype, data, ofile) :
     df2['rate']         = round((df2['amount'] / df2['amount'].shift(1)), 1)
     df2['amount']       = round( df2['amount'] / amountUnit, 2).round(decimals=1)
     df2['volume']       = df2['volume'] // volumeUnit
+    #print(code, name)
     df2                 = getChangeRate(name, df2)
     df2.reset_index(inplace=True)
     df2.to_csv(ofile, index=False)
@@ -225,29 +244,43 @@ def getMergData(code, name, endDate, otype, data, ofile) :
 ############################# 处理自选股票 ############################
 ######################################################################
 def getStockImage(endDate, testFlag, testCode):
-    global codeList, codeName, baseInfo
+    global codeList, codeName, baseInfo, baseFile
     output              = rsltpath + endDate
     if not os.path.exists(output) :
         print("%s :: line %3d : ############### merge data before process\n"\
         %("comDef", sys._getframe().f_lineno))
         sys.exit(0)
+        
+    baseInfo                    = pd.read_csv(baseFile, sep='\t', encoding='gbk')
+    output                      = rsltpath + endDate
+    ofile                       = output + '\\limit.txt'
+    #getLimitup(baseInfo, ofile)
     
+    empty                       = pd.DataFrame(columns=['code', 'name'])
     for tp in drawType:
         ifile                   = output + '\\update_' + tp + '.csv'
-        ofile                   = output + '\\' + tp + '_buy.txt'
+        df                      = pd.read_csv(ifile, parse_dates=[0], encoding='gbk')
+        empty                   = pd.concat([empty, df], axis=0, ignore_index=True)
+        empty.drop_duplicates(inplace=True)
+        #print(len(df))
+        #print(empty)
+    #print(len(empty))
+    
+    if True:
+        ofile                   = output + '\\buy.txt'
         starttime               = datetime.datetime.now()
         process_list            = []
-        if os.path.exists(ifile) :
-            if testFlag :
-                clist           = testCode
-                nlist           = list(map(lambda x: codeName[codeList.index(x)], testCode))
-                print("For test only :", clist, nlist)
-            else:
-                df              = pd.read_csv(ifile, encoding='gbk')
-                clist           = df['code'].tolist()
-                nlist           = df['name'].tolist()
-            print("%s :: line %3d : ############### process %s with testFlag = %d codeNum = %d"\
-            %("comDef", sys._getframe().f_lineno, tp, testFlag, len(clist)))
+        clist                   = empty['code'].tolist()
+        nlist                   = empty['name'].tolist()
+        if testFlag :
+            index               = clist.index(testCode[0])
+            name                = nlist[index]
+            clist               = testCode
+            nlist               = [name]
+            
+        if True:
+            print("%s :: line %3d : ############### process with testFlag = %d codeNum = %d"\
+            %("comDef", sys._getframe().f_lineno, testFlag, len(clist)))
             for i in range(len(clist)):
                 code            = clist[i]
                 name            = nlist[i]
@@ -257,18 +290,27 @@ def getStockImage(endDate, testFlag, testCode):
                     continue
                 if (re.search("ST",    name)):      # 剔除ST板块
                     continue
+
+                value           = baseInfo.loc[ baseInfo['名称'] == name] 
+                if len(value) < 1:
+                    print("%s :: line %3d : code = %s name = %s not find"\
+                          %("comDef", sys._getframe().f_lineno, code, name))
+                    sys.exit(0)
                 
+                if int(value['总金额'].iloc[-1]) == 0:
+                    continue
+                    
                 hfile           = halfpath + code
                 dfile           = dayspath + code
                 wfile           = weekpath + code
-                flag            = getStockBuy(code, name, baseInfo, tp, testFlag, hfile, dfile, wfile)
-                #print(i, len(proc), endDate, code, name, tp, flag)
+                flag            = getStockBuy(code, name, baseInfo, testFlag, hfile, dfile, wfile, value)
+                #print(i, endDate, code, name, flag)
                 if flag[0] == True:
                     process_list.append(flag)
                 if i > 0 and (i % 2000 == 0):
                     endtime = datetime.datetime.now()
-                    print("%s :: line %3d : process %s = %d，succ = %d use time = %s Second"\
-                    %("comDef", sys._getframe().f_lineno, tp, i, len(process_list), (endtime - starttime).seconds))
+                    print("%s :: line %3d : process = %d，succ = %d use time = %s Second"\
+                    %("comDef", sys._getframe().f_lineno, i, len(process_list), (endtime - starttime).seconds))
             
             endtime             = datetime.datetime.now()
             print("%s :: line %3d : process_succ = %d，use time = %s Second"\
@@ -285,7 +327,7 @@ def getStockImage(endDate, testFlag, testCode):
                 #print(ofile)
                 #df.to_excel(ofile)
 ############################# 发送处理邮件 ##########################         
-def sendMail(endDate):
+def sendMail(endDate, befDate):
     if True:
     #if False:
         mail_host               = "smtp.163.com"
@@ -310,20 +352,52 @@ def sendMail(endDate):
         message['From']         = sender
         message['To']           = receivers[0]
     
-    #添加一个文本附件
-    for tp in drawType:
-        output                  = rsltpath + endDate
-        ofile                   = output + '\\' + tp + '_buy.txt'
-        if os.path.exists(ofile):
-            att                         = MIMEText(open(ofile, 'rb').read(), 'base64','utf-8')
-            att['Content-Type']         = 'application/octet-stream'
-            #att['Content-Disposition']  = 'attachment;filename="limtCont.csv"'
-            #print(att)
-            nfile                       = "attachment;filename=\"" + tp + "_buy.txt" + "\""
-            att['Content-Disposition']  = nfile
-            #print(att)
-            message.attach(att)
-    
+    # 添加一个文本附件
+    output                      = rsltpath + endDate
+    ofile                       = output + '\\buy.txt'
+    if os.path.exists(ofile):
+        att                         = MIMEText(open(ofile, 'rb').read(), 'base64','utf-8')
+        att['Content-Type']         = 'application/octet-stream'
+        nfile                       = "attachment;filename=\"" + "buy.txt" + "\""
+        att['Content-Disposition']  = nfile
+        message.attach(att)
+        
+    # 对比今天和前一个工作日的差异
+    output1                     = rsltpath + befDate
+    if os.path.exists(output1):
+        ofile1                  = output1 + '\\buy.txt'
+        ofile2                  = output  + '\\diff.txt'
+        df                      = pd.read_csv(ofile , parse_dates=[0], encoding='gbk')
+        df1                     = pd.read_csv(ofile1, parse_dates=[0], encoding='gbk')
+        empty                   = pd.DataFrame(columns=['code','name','close','amount','sgrow','days','info'])
+        code                    = df['code'].tolist()
+        code1                   = df1['code'].tolist()
+        diff                    = list(set([i for i in code if i not in code1]))
+        for i in range(len(diff)):
+            idx                 = df[(df.code==diff[i])].index.tolist()[0]
+            empty.loc[i]        = df.loc[idx]
+        empty.to_csv(ofile2, index=False, encoding="GBK")
+        print("different code with before workday")
+        print(empty)
+
+        att                         = MIMEText(open(ofile2, 'rb').read(), 'base64','utf-8')
+        att['Content-Type']         = 'application/octet-stream'
+        nfile                       = "attachment;filename=\"" + "diff.txt" + "\""
+        att['Content-Disposition']  = nfile
+        message.attach(att)
+    else :
+        print("before workday %s not exists" %(befDate))
+        
+    # 添加一个文本附件
+    output                      = rsltpath + endDate
+    ofile2                      = output + '\\limit.txt'
+    if os.path.exists(ofile2):
+        att                         = MIMEText(open(ofile2, 'rb').read(), 'base64','utf-8')
+        att['Content-Type']         = 'application/octet-stream'
+        nfile                       = "attachment;filename=\"" + "limit.txt" + "\""
+        att['Content-Disposition']  = nfile
+        message.attach(att)
+
     if True :
     #if False:
         try:

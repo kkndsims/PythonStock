@@ -11,8 +11,8 @@ import os, sys#, re #, datetime, codecs, chardet
 import pandas  as pd
 import numpy   as np
 
-maList                  = [5, 10, 20, 60, 72] 
-maList                  = [5, 10, 20, 72]    
+maList                  = [5, 10, 20, 60, 144] 
+maList                  = [5, 10, 20, 60, 144]    
 bollList                = [20]
 turtleDays              = 20
 amountUnit              = 100000000  #1亿
@@ -24,350 +24,158 @@ macdSlow                = 52 if isMacdMode == 1 else 26
 macdMidd                = 18 if isMacdMode == 1 else 9
 
 daysEnab                = 15    #1111 1111
-daysEnab                =  7    #1111 1111
+daysEnab                = 15    #1111 1111
 
 maxch                   = 0
+limit                   = []
 
 ######################################################################
 ############################# 各种算法处理买点 ########################
 ######################################################################
-def getStockBuy(code, name, baseInfo, tp, testFlag, hfile, dfile, wfile):
+def getStockBuy(code, name, baseInfo, testFlag, hfile, dfile, wfile, info):
     global maxch
-    funcEntryPoint  = False
-    findFlag        = False
-    maxch           = len(name) if len(name) > maxch else maxch
-    name            = name.rjust(maxch)
-    flag, data      = readDataFromFile(code, name, dfile)
+    funcEntry           = False
+    findFlag            = False
+    findFlag            = True
+    testFlag            = False
+    maxch               = len(name) if len(name) > maxch else maxch
+    name                = name.rjust(maxch)
+    flag, day, half     = readDataFromFile(code, name, dfile, hfile)    
     if not flag :
         return findFlag, code, name
-
-    if tp == 'days' :        
-        # daysEnab bits0.寻找龙头股(三板定龙头,找连续2连板)
-        if daysEnab & 1 :
-            result          = getLimitGrow(code[2:], name, testFlag, data)
-            if result[0]:
-                return result
-        # daysEnab bits1.寻找中继(两个海归高点间的低点dif>0; 两高间的低点不破5/20线)
-        if daysEnab & 2 :
-            result          = getContiGrow(code[2:], name, testFlag, data, tp)
-            if result[0]:
-                return result
-        # daysEnab bits2.海归筛选
-        if daysEnab & 4 :
-            result          = getTurtleGrow(code[2:], name, testFlag, data)
-            if result[0]:
-                return result
-        # daysEnab bits3.低点dif突破0轴,比前一个低点的dif高
-        if daysEnab & 8 :
-            result          = getMacdDifGrow(code[2:], name, testFlag, data)
-            if result[0]:
-                return result
-
-        return findFlag, code, name
     
-    elif tp == 'half' :
-        # 筛出日线不满足
-        flag, data  = readDataFromFile(code, name, dfile)
-        if not flag :
-            return findFlag, code, name
-        if data['close'].iloc[-1] < data['ma_20'].iloc[-1]:
-            return findFlag, code, name
-        # 找出最近放量
-        #cntm        = getDaysMount(code, name, testFlag, data, wins)
-        #if not cntm :
-        #    return findFlag, code, name    
-        # 筛出half不满足
-        flag, data  = readDataFromFile(code, name, hfile)
-        if not flag :
-            return findFlag, code, name
-        
-        # Step2.寻找中继(两个海归高点间的低点dif>0; 两高间的低点不破5/20线)
-        result      = getContiGrow(code[2:], name, testFlag, data, tp)
+    #寻找超跌后趋势反转
+    if daysEnab & findFlag & 1:
+        result          = findTrence(code[2:], name, testFlag, day, half, info)
         if result[0]:
             return result
-        return findFlag, code, name
-    
-    elif tp == 'week' :
-        return findFlag, code, name
-    
-    return findFlag, code, name
-    sys.exit(0)
+    # 成交放量
+    if daysEnab & findFlag & 1:
+        result          = findAmount(code[2:], name, testFlag, day, half, info)
+        if result[0]:
+            return result
+        
+    return False, code, name
+    #sys.exit(0)
 
-############################# B0:日线连板 ############################
-def getLimitGrow(code, name, testFlag, data):
-    cnt2                = (data['grow'].tail(2) >= 9.7).astype(int).sum()  
-    cnt5                = (data['grow'].tail(5) >= 9.7).astype(int).sum()
-    if cnt2 == 2 and cnt5 == 2:
-        lens            = len(data)
-        mgrow           = getGrowFromMin  (data)
-        #if mgrow > 2:
-        #    return False, code, name
-        close           = strClose(data['close'].iloc[-1])
-        mount           = strMount(data['amount'].iloc[-1])
-        info            = "9.连板"
-        if lens < 30 :
-            allCnt      = len(data.grow >= 9.7)
-            if allCnt == lens:
-                info    += "新"+str(lens)
-        result          = [True, code, name, close, mount, mgrow, cnt2, info]
+############################# 放量后缩量调整，或者刚放量 ############################
+def findAmount(code, name, testFlag, days, half, inn):
+    close               = days['close'].tolist()
+    if close[-1] < days['ma_5' ].iloc[-1] :
+        return False, code, name
+    if close[-1] < days['ma_10'].iloc[-1] :
+        return False, code, name
+    if close[-1] < days['ma_144'].iloc[-1] :
+        return False, code, name
+    vrate               = days['rate'].tolist()
+    nrate               = [a if a >= 2 else 0 for a in vrate]
+    haspeak             = np.nonzero(nrate)[0]
+    days['vma_5']       = days['amount'].rolling(window= 5).mean().round(decimals=2)
+    days['vma_10']      = days['amount'].rolling(window=10).mean().round(decimals=2)
+    if len(haspeak) == 0:
+        return False, code, name
+    procTurtleData(days, 60)
+    turcnt              = days['tur'].tail(1).sum()
+    if turcnt == 0 :
+        return False, code, name
+    idxpeak             = haspeak[-1]
+    idxend              = 0
+    peak                = 0
+    avrg                = 0
+    info                = "9.5.放量"
+    lens                = len(days)
+    gap                 = len(days) - idxpeak
+    minval              = days['close'].iloc[-90:].min()
+    grow                = round(close[-1] / minval,2 )
+    change              = days['change'].iloc[-1]
+    amount              = days['amount'].iloc[-1]
+    growcnt             = (days['grow'] > 7).tail(gap).sum()
+    if growcnt == 0:
+        return False, code, name        
+    if not (days['amount'].iloc[idxpeak] >= 3 or days['change'].iloc[idxpeak] >= 5):
+        return False, code, name
+    if days['vma_5'].iloc[idxpeak] < days['vma_10'].iloc[idxpeak] :
+        return False, code, name
+    #print(code, name, idxpeak, lens, gap)
+    for i in range(idxpeak, lens):
+        #print(close[i])
+        if days['vma_5'].iloc[i] < days['vma_10'].iloc[i] :
+            #print(idxpeak, idxend, lens, gap)
+            idxend      = i 
+            peak        = max(close[idxpeak:idxend])
+            avrg        = days['amount'].iloc[idxpeak:idxend].mean()
+            info        += "_缩量"
+            #print("peak start at [%d:%d], peak = %.2f" %(idxpeak, idxend, peak))
+            break
+    if idxend == 0:     # 量能继续增加
+        peak            = days['close'].iloc[idxpeak-20:idxpeak].max()
+        avrg            = days['amount'].iloc[idxpeak:].mean()
+        if amount < 3 or avrg < 2 or gap < 4:
+            return False, code, name
+        info            += "_放量"
+        #print("peak start at end[%d:%d], peak = %.2f" %(idxpeak, lens, peak))
+            
+    if close[-1]    >= peak \
+    and gap         <= 30   \
+    and change      >= 2    \
+    and grow        <= 1.5  \
+    and True :
+        sclose          = strClose(days['close'].iloc[-1])
+        info            += str(change).rjust(5) + "%"
+        result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, str(gap).rjust(2), info]
+        return result
+    return False, code, name
+############################# 超跌吸筹反弹 ################################
+def findTrence(code, name, testFlag, days, half, inn):
+    if days['close'].iloc[-1] < days['ma_60' ].iloc[-1] :
+        return False, code, name
+    if days['close'].iloc[-1] < days['ma_144'].iloc[-1] :
+        return False, code, name
+    days['sf60']            = days['ma_60' ].shift(1)
+    days['sf144']           = days['ma_144'].shift(1)
+    days['cross']           = 0
+    days['cross']           = days.apply(lambda x : 1 if ((x.sf60 < x.sf144) & (x.ma_60 >= x.ma_144)) else -1 if ((x.sf60 >= x.sf144) & (x.ma_60 < x.ma_144)) else 0, axis=1)
+    cross                   = days['cross'].tolist()
+    peak                    = np.nonzero(cross)[0]
+    lens                    = len(peak)
+    if lens == 0:
+        return False, code, name
+    
+    df                      = pd.DataFrame(peak, columns=['idx'])
+    df['cross']             = 0
+    index                   = 0
+    for i in peak:
+        df['cross'].iloc[index]     = cross[i]
+        index               += 1
+    df['gap']               = df['idx'] - df['idx'].shift(1)
+    df['flag']              = df.apply(lambda x : 1 if x.cross == 1 and x.gap >= 120 else 0, axis=1)
+    df                      = df.where(df.gap > 10).dropna()
+    if len(df) == 0:
+        return False, code, name
+    delta                   = int(df['gap'].iloc[-1])
+    point                   = int(df['idx'].iloc[-1])
+    cnt                     = int(df['flag'].tail(1).sum())
+    amount                  = days['amount'].iloc[-1]
+    change                  = days['change'].iloc[-1]
+    gaps                    = int(len(days) - df['idx'].iloc[-1])
+    grow                    = round(days['close'].iloc[-1] / days['close'].iloc[point-20:-1].min(), 2)
+    if  cnt \
+    and gaps   <= 5 \
+    and change >= 2 \
+    and grow   < 1.5\
+    and True:
+        sclose              = strClose(days['close'].iloc[-1])
+        info                = "9.4.超跌_" + str(delta) + "天 " + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
         return result
     return False, code, name
 
-############################# B1:调整新高 ############################
-def getContiGrow(code, name, testFlag, data, tp):
-    findFlag            = False
-    info                = "8.中继："
-    # 剔除涨幅过大
-    mgrow               = getGrowFromMin  (data)
-    sgrow, idx          = getGrowFromStage(data)
-    if mgrow > 2 or sgrow > 1.62:
-        return False, code, name
-    
-    # 找出两次海龟
-    result              = getTurlProcs(code, name, testFlag, data)
-    if not result[0]:
-        return findFlag, code, name
-    p1                  = result[1]
-    p0                  = result[2]
-    days                = result[3]
-    gap                 = result[4]
-    close               = strClose(data['close' ].iloc[p0])
-    if data['close'].iloc[-1] < data['close'].iloc[p0]:
-        return findFlag, code, name
-    
-    amount              = 0
-    change              = 0
-    if tp == 'days' :
-        amount          = data['amount'].iloc[-1]
-        change          = data['change'].iloc[-1]
-        flag1           = getValidDays(code, name, testFlag, data)
-        # 日线有成交量
-        if not flag1 :
-            return False, code, name
-    elif tp == 'half':
-        amount          = round(data['amount'].tail(8).sum(),1)
-        change          = round(data['change'].tail(8).sum(),1)
-    mount               = strMount(amount)
-    # 最后一天有成交量
-    flag2               = chkLastDays(code, name, testFlag, amount, change)
-    if not flag2:
-        return False, code, name
-    
-    # 调整：不破5/20日线；不破/跌破又站上0轴          
-    if  data['close'].iloc[-1] >= data['close'].iloc[p0] \
-    and gap <= 5 :
-        cntma5          = (data['close'].iloc[p1:p0] >= data['ma_5' ].iloc[p1:p0]).astype(int).sum()
-        if cntma5 == days:
-            findFlag    = True
-            info        += "不破 5日_" + str(gap) + "天_" + str(change).rjust(5) + "%"
-            result      = [findFlag, code, name.rjust(4), close, mount, sgrow, str(days).rjust(2), info]
-            return result
-        
-        cntma20         = (data['close'].iloc[p1:p0] >= data['ma_20'].iloc[p1:p0]).astype(int).sum()
-        if cntma20 == days:
-            findFlag    = True
-            info        += "不破20日_" + str(gap) + "天_" + str(change).rjust(5) + "%"
-            result      = [findFlag, code, name.rjust(4), close, mount, sgrow, str(days).rjust(2), info]
-            return result
-        
-        cntdiff         = (data['dif'].iloc[p1:p0] >= -0.02).astype(int).sum()
-        if cntdiff == days:
-            findFlag    = True
-            info        += "不破 0轴_" + str(gap) + "天_" + str(change).rjust(5) + "%"
-            result      = [findFlag, code, name.rjust(4), close, mount, sgrow, str(days).rjust(2), info]
-            return result
-        else:
-            findFlag    = True
-            info        += "跌破 0轴_" + str(gap) + "天_" + str(change).rjust(5) + "%"
-            result      = [findFlag, code, name.rjust(4), close, mount, sgrow, str(days).rjust(2), info]
-            return result
-    return findFlag, code, name
-############################# B1:寻找两高 ############################
-def getTurlProcs(code, name, testFlag, data):
-    # 两高间的低点>5日/20日; dif>0轴
-    lens                = len(data)
-    tur                 = data['tur'].tolist()
-    hastur              = np.nonzero(tur)[0]        # array[0]返回tur非0的索引值
-    if len(hastur) < 2 :
-        #print(code, name, str(len(hastur)) + "个海龟", lens)
-        return [False, code, name]
-
-    # 把海龟list右移相减，找出调整大于5天的时间段
-    find                = False
-    dltdf               = pd.DataFrame(hastur)
-    dltdf.columns       = ['tur']
-    dltdf['tur']        = dltdf['tur'] - dltdf['tur'].shift(1)
-    dlttur              = dltdf['tur'].tolist()
-    for i in range(len(dlttur)-1, 0, -1):
-        if dlttur[i] >= 5 :
-            p0          = hastur[i]
-            p1          = hastur[i-1]
-            find        = True
-            days        = p0 - p1
-            gap         = lens - 1 - p0
-            break
-    if not find:
-        #print(code, name, "没有找到", lens)
-        return [False, code, name]
-    else:
-        dif             = data['dif'].tolist()
-        if dif[p0] < dif[p1] \
-        or dif[-1] < dif[p1] \
-        or data['close'].iloc[-1] < data['close'].iloc[p0]:
-            return [False, code, name]
-        
-        if testFlag :
-            print(hastur)
-            print(dlttur)
-            print(code, name, p0, p1, days, gap, data['close' ].iloc[p1], data['close' ].iloc[p0])
-        return [True, p1, p0, days, gap]   
-
-############################# B2:海归筛选 ############################
-def getTurtleGrow(code, name, testFlag, data):
-    findFlag            = False    
-    info                = "7.tur"
-    # 获取海归
-    data['tur']         = data['close'] == data['close'].rolling(window=180).max()
-    data['peak']        = data['close'] == data['close'].rolling(window=20,center=True).max()
-    tur                 = data['tur'].tolist()
-    turcnt              = (data['tur'].tail(3) == True).astype(int).sum()
-    if turcnt == 0:
-        return findFlag, code, name 
-    
-    # 获取最近低点
-    lens                = len(data)
-    peak                = data['peak' ].tolist()
-    close               = data['close'].tolist()        
-    haspeak             = np.nonzero(peak)[0]          # array[0]返回非0的索引值
-    maxidx              = 0
-    minidx              = 0
-    if len(haspeak) == 0:
-        maxidx          = data['close'].tail(20).idxmax()
-        minidx          = data['close'].tail(20).idxmin()
-        if maxidx > minidx :
-            print(code, name, "has no higher", maxidx, close[maxidx], minidx, close[minidx])
-            sys.exit(0)
-    else:
-        maxidx          = haspeak[-1]
-        minidx          = data['close'].iloc[maxidx:].idxmin()
-    minval              = close[minidx]
-    days                = lens - minidx
-
-    # 获取有效海归
-    grow                = round(close[-1] / minval, 2)
-    change              = data['change'].iloc[-1]
-    amount              = data['amount'].iloc[-1]
-    dif                 = data['dif'].tolist()
-    mount               = strMount(amount)
-    sclose              = strClose(close[-1])
-    cntm                = getMountDays(code, name, testFlag, data, days)
-    if testFlag:
-        print(code, name, maxidx, close[maxidx], lens - maxidx)
-        print(code, name, minidx, close[minidx], days)
-        print(code, name, cntm)
-        
-    if  cntm        > 0 \
-    and grow        < 1.5 \
-    and days        <= 13 \
-    and close[-1]   > close[maxidx] \
-    and dif[minidx] >= -0.05 \
-    and dif[-1]     >= -0.05 \
-    and True :
-        findFlag        = True
-        info            += "海归：" + "change_" + str(change).rjust(5) + "%"
-        result          = [findFlag, code, name.rjust(4), sclose, mount, grow, str(days).rjust(2), info]
-        return result
-    return findFlag, code, name
-
-############################# B2:dif递增 ############################
-def getMacdDifGrow(code, name, testFlag, data):
-    findFlag            = False    
-    info                = "8.dif"
-    lens                = len(data)
-    dif                 = data['dif' ].round(decimals=2).tolist()
-    # 找出dif低点
-    dmin                = data['dmin'].tolist()
-    close               = data['close'].tolist()
-    change              = data['change'].iloc[-1]
-    amount              = data['amount'].iloc[-1]
-    mount               = strMount(amount)
-    sclose              = strClose(close[-1])
-    hasdmin             = np.nonzero(dmin)[0]        # array[0]返回tur非0的索引值
-    if testFlag:
-        print(code, name, dif)
-        print(code, name, dmin)
-        print(code, name, hasdmin)
-        
-    if len(hasdmin) == 0 :
-        if dif[-1] > 0 : 
-            days        = lens
-            grow        = round(close[-1] / close[0], 2)
-            info        += "新股：" + str(dif[-1]) + str(change).rjust(5) + "%"
-            result      = [True, code, name.rjust(4), sclose, mount, grow, str(days).rjust(2), info]
-            return result
-            print("%s %4s\t %2d天 No dif poke dif = %0.2f" %(code, name, lens, dif[-1]))
-        return False, code, name
-    
-    # 连续多个dif低点只保留一个
-    for i in range(len(hasdmin)):
-        idx             = hasdmin[i]
-        lft             = idx - 5 if idx >= 5 else 0
-        rgt             = idx + 5 if idx + 5 < lens else lens - 1
-        #print(idx, lft, rgt)
-        #print(idx, dif[idx], min(dif[lft:rgt+1]), dif[idx] != min(dif[lft:rgt+1]), dif[lft:rgt+1])
-        #sys.exit(0)
-        if dif[idx] != min(dif[lft:rgt+1]):
-            dmin[idx]   = False
-    hasdmin             = np.nonzero(dmin)[0]
-    #print(code, name, hasdmin)
-
-    idx0                = hasdmin[-1]
-    idx1                = hasdmin[-2] if len(hasdmin) >= 2 else idx0
-    dif0                = round(dif[idx0], 2)
-    dif1                = round(dif[idx1], 2)
-    #print(code, name, len(data), idx1, idx0)
-    grow                = round(close[-1] / close[idx0], 2)
-    days                = lens - hasdmin[-1]
-    
-    if  abs(dif0) < 0.05 and dif[-1] > dif0 \
-    and True :
-        findFlag        = True
-        info            = "3.dif"
-        info            += "连增：" + str(dif0) + "/" + str(dif[-1]) + str(change).rjust(5) + "%"
-        result          = [findFlag, code, name.rjust(4), sclose, mount, grow, str(days).rjust(2), info]
-        return result
-    return findFlag, code, name
-
-############################# 寻找高换手 ###########################    
-def getHighCHange(code, name, testFlag, data):
-    findFlag            = False
-    # 剔除涨幅过大
-    mgrow               = getGrowFromMin  (data)
-    sgrow, idx          = getGrowFromStage(data)
-    if mgrow > 2 or sgrow > 1.62:
-        return False, code, name
-    
-    # 找出放量
-    mount               = strMount(data['amount'].iloc[-1])
-    close               = strMount(data['close' ].iloc[-1])
-    cntc                = (data['change'].iloc[-wins:] >= 30).astype(int).sum()
-    change              = data['change'].iloc[-1]
-    grow                = data['grow'  ].iloc[-1]
-    gap                 = len(data) - data['close'].tail(20).idxmin()
-    days                = gap
-    if  cntc:
-        if  True:
-            findFlag    = True
-            info        = "巨量：" + str(change).rjust(5) + "%"
-            result      = [findFlag, code, name.rjust(4), close, mount, sgrow, str(days).rjust(2), info]
-            return result
-        
-    return findFlag, code, name
 
 ######################################################################
 ############################# 基础处理函数 ############################
 ######################################################################
 def strClose(close):
+    baseFuncEntry       = False
     return str(close).rjust(6)
 def strMount(mount):
     return str(mount).rjust(6)+"亿"
@@ -378,19 +186,30 @@ def getGrowFromStage(data):
     index               = data['close'].iloc[-20:].idxmin()
     grow                = round(data['close'].iloc[-1] / data['close'].iloc[-20:].min(), 2)
     return grow, index
+def getSealingNum(data):
+    grow                = data['grow'].tolist()
+    seal                = [1 if a >= 9.7 else 0 for a in grow]
+    data['seal']        = pd.DataFrame(seal)
+    data['flag']        = data['seal'].rolling(window=2).sum() == 2
+    del data['seal']
 ############################# 从文件读数据 ###########################
-def readDataFromFile(code, name, path):
-    if not os.path.exists(path) :
-        return False, pd.DataFrame()
-    data                = pd.read_csv(path, parse_dates=[0])
-    data.sort_values('date', ascending=True, inplace=True)
-    data                = procMaData  (data)
-    data                = procMacdData(data)
-    procTurtleData(data, turtleDays)
-    if data['close'].iloc[-1] < data['ma_20'].iloc[-1] :
-        return False,data 
-    else:
-        return True, data
+def readDataFromFile(code, name, dpath, hpath):
+    empty               = pd.DataFrame()
+    if not os.path.exists(dpath) :
+        return False, empty, empty
+    ddata               = pd.read_csv(dpath, parse_dates=[0])
+    ddata.sort_values('date', ascending=True, inplace=True)
+    ddata               = procMaData  (ddata)
+    #ddata               = procMacdData(ddata)
+    if len(ddata) == 0:
+        return False, empty, empty
+    
+    #if not os.path.exists(hpath) :
+    #    return False, ddata, empty
+    #hdata               = pd.read_csv(hpath, parse_dates=[0])
+    #hdata.sort_values('date', ascending=True, inplace=True)
+    #hdata               = procMaData  (hdata)
+    return True, ddata, empty
 ############################# 寻找有效日线 ###########################
 def getValidDays(code, name, testFlag, data):
     # 有大阳(4%); 有海龟; 有换手率
@@ -409,11 +228,11 @@ def getMountDays(code, name, testFlag, data, wins):
     df                  = data.tail(wins)
     if testFlag:
         #print(df)
-        print(code, name, wins, len(df[(df.amount>=10)]))
-        print(code, name, wins, len(df[(df.change>=30)]))
-        print(code, name, wins, len(df[(df.amount>=6) & (df.change>= 5)]))
-        print(code, name, wins, len(df[(df.amount>=4) & (df.change>=10)]))
-        print(code, name, wins, len(df[(df.amount>=2) & (df.change>=20)]))
+        print("getMountDays:", code, name, wins, len(df[(df.amount>=10)]))
+        print("getMountDays:", code, name, wins, len(df[(df.change>=30)]))
+        print("getMountDays:", code, name, wins, len(df[(df.amount>=6) & (df.change>= 5)]))
+        print("getMountDays:", code, name, wins, len(df[(df.amount>=4) & (df.change>=10)]))
+        print("getMountDays:", code, name, wins, len(df[(df.amount>=2) & (df.change>=20)]))
     cntm                = len(df[(df.amount>=10)]) \
                         + len(df[(df.change>=30)]) \
                         + len(df[(df.amount>=6) & (df.change>= 5)]) \
@@ -511,3 +330,176 @@ def procPeakList(close, gap) :
 #####################################################################
 
          
+
+
+
+
+
+
+
+#####################################################################
+############################# 无效函数 ###############################
+#####################################################################
+############################# 封单额/成交额 > 2 ########################
+def findSealing(code, name, testFlag, days, half, inn):
+    # 内盘：主动卖； 外盘：主动买，涨停时外盘0为封一字; 外盘越少，买方越强势
+    if inn['封单额'].iloc[-1] != "--  " and inn['涨幅%'].iloc[-1] > "0":
+        amount              = round(float(inn['总金额'].iloc[-1]) / 10000, 2)
+        sealing             = round(float(inn['封单额'].iloc[-1]) / 10000, 2)
+        rate                = round(sealing / amount, 2)
+        grab                = 1 if rate > 0.8  else 0  # 封单 > 成交量，抢筹
+        amplitude           = 1 if float(inn['振幅%'].iloc[-1]) == 0 else 0  # 振幅为0，一字板
+        change              = days['change'].iloc[-1]
+        sclose              = strClose(days['close'].iloc[-1])
+        if grab or amplitude:
+            info            = "9.9.大单封停:" if grab else "9.9.一字涨停:" if amplitude else ""
+            info            += str(change).rjust(5) + "%"
+            result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", str(sealing)+"亿", str(rate).rjust(2), info]
+            return result
+    return False, code, name
+############################# 巨量换手/振幅 ############################
+def findChange(code, name, testFlag, days, half, inn):
+    close                   = days['close'].iloc[-1]
+    amount                  = days['amount'].iloc[-1]                
+    change                  = days['change'].iloc[-1]
+    scope                   = str(float(inn['振幅%'].iloc[-1]))+"%"
+    grow                    = str(float(inn['涨幅%'].iloc[-1]))+"%"
+    sclose                  = strClose(close)
+    if change >= 50 and float(inn['涨幅%'].iloc[-1]) > 0 :
+        info                = "9.8.巨量换手:" + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, scope, info]
+        return result
+    return False, code, name
+############################# 突破回踩不破均线 ########################
+def findMaBreak(code, name, testFlag, days, half, inn):
+    close                   = days['close'].tolist()
+    change                  = days['change'].iloc[-1]
+    lens                    = len(days)
+    for ma in reversed(maList):
+        maval               = days['ma_'+str(ma)].tolist()
+        if  ma >= 60 and not pd.isna(maval[-1]) and close[-1] > maval[-1]:
+            cr              = [0 for i in range(lens)]
+            for i in range(1, lens):
+                if close[i-1] < maval[i-1] and close[i] >= maval[i]:
+                    cr[i]   = 1
+            days['cross']   = pd.DataFrame(cr)
+            procTurtleData(days, 60)
+            turcnt          = days['tur'].tail(1).sum()
+            hastur          = np.nonzero(cr)[0]
+            if len(hastur) == 0:
+                return False, code, name
+            
+            gap             = lens - hastur[-1]    
+            minval          = days['close'].tail(gap).min()
+            minidx          = days['close'].tail(gap).idxmin()
+            amount          = days['amount'].iloc[-1]
+            grow            = round(close[-1] / min(close[-60:]), 2)
+            if testFlag:
+                print(code, name, lens, gap, hastur, minval, minidx)
+        
+            if  turcnt      \
+            and gap         <= 9    \
+            and close[-1]   >= days['ma_10'].iloc[-1] \
+            and close[-1]   >= days['ma_20'].iloc[-1] \
+            and minval      >= maval[minidx]    \
+            and change      >= 5                \
+            and grow        < 1.35              \
+            and amount      >= 3                \
+            and True :
+                info        = "9.6.ma_" + str(ma) + "中继"
+                sclose      = strClose(close[-1])
+                info        += str(change).rjust(5) + "%"
+                result      = [True, code, name.rjust(4), sclose, amount, grow, str(gap).rjust(2), info]
+                return result
+    return False, code, name
+############################# 涨停分析 ################################
+def findLimitup(code, name, testFlag, days, half, inn):
+    if float(inn['涨幅%'].iloc[-1]) < 9.8:
+        return False, code, name
+    close                   = days['close'].tolist()
+    for ma in reversed(maList):
+        if not pd.isna(  days['ma_'+str(ma)].iloc[-1]) \
+        and close[-1] >= days['ma_'+str(ma)].iloc[-1] :
+            procTurtleData(days, 60)
+            turcnt          = days['tur'].tail(1).sum()
+            if turcnt == 0:
+                return False, code, name
+                
+            amount          = days['amount'].iloc[-1]                
+            change          = days['change'].iloc[-1]
+            minval          = days['close'].iloc[-60:].min()
+            minidx          = days['close'].iloc[-60:].idxmin()
+            grow            = round(close[-1] / minval, 2)
+            gaps            = len(days) - minidx - 1
+            #if grow > 1.32 or change < 5:
+            if grow > 1.32 or change < 5:
+                return False, code, name
+            sclose          = strClose(days['close'].iloc[-1])
+            info            = "8.9.涨停：" + str(change).rjust(5) + "%"
+            result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
+            return result
+    return False, code, name
+############################# 寻找海归 ################################
+def findTurtle(code, name, testFlag, days, half, inn):
+    procTurtleData(days, 60)
+    turcnt                  = days['tur'].tail(1).sum()
+    if turcnt == 0 :
+        return False, code, name
+    
+    if days['grow'].iloc[-1] >= 5 :
+        amount              = days['amount'].iloc[-1]                
+        change              = days['change'].iloc[-1]
+        minval              = days['close' ].iloc[-20:].min()
+        minidx              = days['close' ].iloc[-20:].idxmin()
+        grow                = round(days['close'].iloc[-1] / minval, 2)
+        gaps                = len(days) - minidx - 1
+        if amount < 3 or change < 5 or grow > 1.35:
+            return False, code, name
+        sclose              = strClose(days['close'].iloc[-1])
+        info                = "9.3.海龟：" + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
+        return result
+    return False, code, name
+############################# 连续涨停后调整 ############################
+def findContinue(code, name, testFlag, days, half, inn):
+    getSealingNum(days)
+    flag                    = days['flag'].tolist()
+    haspeak                 = np.nonzero(flag)[0]
+    if len(haspeak) == 0:
+        return False, code, name
+    
+    idx                     = haspeak[-1]
+    gaps                    = len(days) - idx
+    close                   = days['close'].tolist()
+    peak                    = close[idx]
+    amount                  = days['amount'].iloc[-1]                
+    change                  = days['change'].iloc[-1]
+    mval                    = days['close'].iloc[idx:].min()
+    grow                    = round(close[-1] / min(close[-90:]), 2)
+    sclose                  = strClose(close[-1])
+    
+    procTurtleData(days, 30)
+    turcnt              = days['tur'].tail(3).sum()
+    if  mval >= peak and close[-1] == max(close[idx:]) \
+    and grow <= 1.62\
+    and gaps <= 15  \
+    and gaps >= 3   \
+    and turcnt >= 1 \
+    and True :
+        info                = "9.7.连涨不调整:" + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
+        return result
+    
+    if  mval <  peak and close[-1] >= (peak * 0.99) \
+    and close[-1] >= days['ma_10'].iloc[-1] \
+    and close[-1] >= days['ma_5' ].iloc[-1] \
+    and close[-1] >= mval \
+    and grow <  1.62\
+    and gaps <= 15  \
+    and gaps >= 3   \
+    and True :
+        info                = "9.7.连涨调整:" + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
+        return result
+    return False, code, name
+#####################################################################
