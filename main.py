@@ -21,8 +21,8 @@ if __name__ == '__main__' :
     procInitStockData(endDate)  #处理half/days/week数据
     
     testList            = []
-    #testList            = ['SH600158']  #上证
-    #testList            = ['SZ000513']  #深证
+    #testList            = ['SH605398']  #上证
+    #testList            = ['SZ002995']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         

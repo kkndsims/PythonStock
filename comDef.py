@@ -317,7 +317,7 @@ def getStockImage(endDate, testFlag, testCode):
             %("comDef", sys._getframe().f_lineno, len(process_list), (endtime - starttime).seconds))
             if process_list :
                 df              = pd.DataFrame(process_list)
-                df.columns      = ['flag', 'code', 'name', 'close', 'amount', 'sgrow', 'days', 'info']
+                df.columns      = ['flag', 'code', 'name', 'close', 'amount', 'bot', 'grow', 'days', 'info']
                 del df['flag']
                 df.sort_values('info', ascending=False, inplace=True)
                 print(df)
@@ -369,7 +369,7 @@ def sendMail(endDate, befDate):
         ofile2                  = output  + '\\diff.txt'
         df                      = pd.read_csv(ofile , parse_dates=[0], encoding='gbk')
         df1                     = pd.read_csv(ofile1, parse_dates=[0], encoding='gbk')
-        empty                   = pd.DataFrame(columns=['code','name','close','amount','sgrow','days','info'])
+        empty                   = pd.DataFrame(columns=['code','name','close','amount','bot','grow','days','info'])
         code                    = df['code'].tolist()
         code1                   = df1['code'].tolist()
         diff                    = list(set([i for i in code if i not in code1]))
