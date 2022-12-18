@@ -10,7 +10,6 @@ Created on Mon Oct 10 22:59:41 2016
 import os, sys, datetime, calendar#, codecs, chardet
 import re
 import pandas  as pd
-#import openyxl
 
 import smtplib
 from email.mime.text import MIMEText
@@ -158,7 +157,7 @@ def getChangeRate(name, data) :     # 计算换手率
     global baseInfo
     nameList            = baseInfo['名称'].tolist()
     idx                 = nameList.index(name)
-    volume              = baseInfo['流通股(亿)'].iloc[idx]
+    volume              = baseInfo['流通股(亿)'].loc[idx]
     data['change']      = (data['volume'] / float(volume)).round(decimals=1)
     return data
 def getUpdateMap(endDate, code, name, tp) :
@@ -201,9 +200,9 @@ def getUpdateMap(endDate, code, name, tp) :
             data            = data[~data['volume'].isin([0])]
             if tp == 'days':
                 data['grow']    = round(((data['close'] / data['close' ].shift(1) - 1) * 100), 2)
-                data['rate']    = round((data['amount'] / data['amount'].shift(1)), 2)
+                data['rate']    = round((data['amount'] / data['amount'].shift(1)), 1)
                 data['amount']  = round( data['amount'] / amountUnit, 2).round(decimals=2)
-                data['volume']  = data['volume'] // volumeUnit
+                data['volume']  = round( data['volume'] / volumeUnit, 2).round(decimals=2)
                 data            = getChangeRate(name, data)
                 data.to_csv(ofile, index=False)
                 return True
@@ -213,7 +212,7 @@ def getUpdateMap(endDate, code, name, tp) :
 def getMergData(code, name, endDate, otype, data, ofile) :
     period              = "0.5H"   if otype == "half" else "W"
     data['date']        = pd.to_datetime(data['date']) #把字符串转换成时间信息
-    dt                  = data['date'].iloc[-1]  
+    dt                  = data['date'].loc[-1]  
     dt                  = datetime.datetime.strptime(str(dt),"%Y-%m-%d %H:%M:%S")     
     lastDate            = str(dt.year) + str(dt.month).zfill(2) + str(dt.day).zfill(2)
     if lastDate != endDate :

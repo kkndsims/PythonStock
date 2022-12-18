@@ -10,9 +10,11 @@ Created on Mon Oct 10 22:59:41 2016
 import os, sys#, re #, datetime, codecs, chardet
 import pandas  as pd
 import numpy   as np
+import warnings
+warnings.filterwarnings( "ignore" )
 
 maList                  = [5, 20, 60, 144] 
-maList                  = [5, 20, 60, 144]    
+amList                  = [5, 10]    
 bollList                = [20]
 turtleDays              = 20
 amountUnit              = 100000000  #1亿
@@ -28,6 +30,7 @@ daysEnab                = 15    #1111 1111
 
 maxch                   = 0
 limit                   = []
+empty                   = pd.DataFrame()
 
 ######################################################################
 ############################# 各种算法处理买点 ########################
@@ -42,7 +45,34 @@ def getStockBuy(code, name, baseInfo, testFlag, hfile, dfile, wfile, info):
     flag, day, half     = readDataFromFile(code, name, dfile, hfile)    
     if not flag :
         return findFlag, code, name
+    
+    # 数据清洗，去除成交量或者换手率不足的个股
+    if not procBasicPrice(day):
+        return False, code, name
+    # 数据清洗，海龟：60days；顶点：10days    
+    procBasicInfo(day, 60, 10)
 
+    # 缩量涨停，一致看多
+    if daysEnab & findFlag & 0:
+        result          = findSealing(code[2:], name, testFlag, day, half, info)
+        if result[0]:
+            return result
+    # 强势洗盘，巨大振幅，2~3天内收复前高，不破10日均线
+    if daysEnab & findFlag & 1:
+        result          = findStrWash(code[2:], name, testFlag, day, half, info)
+        if result[0]:
+            return result
+    # 涨停点火，调整后中继创新高
+    if daysEnab & findFlag & 0:
+        result          = findFstSeal(code[2:], name, testFlag, day, half, info)
+        if result[0]:
+            return result
+    # 成交放量，继续放量/缩量调整
+    if daysEnab & findFlag & 1:
+        result          = findFireup(code[2:], name, testFlag, day, half, info)
+        if result[0]:
+            return result
+        
     #寻找长期超跌股
     if daysEnab & findFlag & 0:
         result          = findDecrease(code[2:], name, testFlag, day, half, info)
@@ -53,20 +83,156 @@ def getStockBuy(code, name, baseInfo, testFlag, hfile, dfile, wfile, info):
         result          = findTrence(code[2:], name, testFlag, day, half, info)
         if result[0]:
             return result
-    # 海龟
-    if daysEnab & findFlag & 1:
-        result          = findTurtle(code[2:], name, testFlag, day, half, info)
-        if result[0]:
-            return result
-    # 成交放量
-    if daysEnab & findFlag & 0:
-        result          = findAmount(code[2:], name, testFlag, day, half, info)
-        if result[0]:
-            return result
-        
+
     return False, code, name
-    #sys.exit(0)
+    sys.exit(0)
+
+############################# 缩量涨停 ###################################
+def findSealing(code, name, testFlag, days, half, inn):
+    if inn['封单额'].iloc[-1] != "--  " and inn['涨幅%'].iloc[-1] > "0":
+        amount              = days['amount'].iloc[-1]
+        change              = days['change'].iloc[-1]
+        close               = days['close' ].iloc[-1]
+        sclose              = strClose(close)
+        if amount and amount < days['amount'].iloc[-2] :
+            minval          = days['close'].tail(20).min()
+            minidx          = days['close'].tail(20).idxmin()
+            grow            = round(close / minval, 2)
+            gaps            = len(days) - minidx
+            if grow >= 1.4:
+                return False, code, name
+            info            = "9.9.2缩量涨停:" +str(change).rjust(5) + "%"
+            result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
+            return result
+    return False, code, name
+############################# 强势洗盘，巨幅震荡收复前高 ###################################
+def findStrWash(code, name, testFlag, days, half, inn):
+    close                   = days['close'].tolist()
+    amount                  = days['amount'].iloc[-1]
+    change                  = days['change'].iloc[-1]
+    days['ampl']            = (days['high'] / days['low']).round(decimals=2)
+    days['wash']            = [1 if a >= 1.15 and b < 0 else 0 for a, b in zip(days['ampl'].tolist(), days['grow'].tolist())]
+    gtAmpl                  = days.where(days.wash == 1).dropna().index
+    point                   = gtAmpl[-1] if len(gtAmpl) else 0
+    gaps                    = len(days) - point
+    #print(days.tail(10))
+    # 去除新股，最近三天没有巨幅震荡的个股，刚巨幅震荡的个股
+    if len(days) <= 5 or gaps > 5 or gaps == 1:
+        return False, code, name
     
+    fireup                  = close[point]
+    isTur                   = 1 if close[-1] >= max(close[point-5:]) else 0
+    fw0                     = gaps + maList[-1]
+    fw1                     = gaps + maList[-2]
+    grow0                   = round(close[-1] / days['close'].tail(fw0).min(), 2)
+    grow1                   = round(close[-1] / days['close'].tail(fw1).min(), 2)
+    sclose                  = strClose(close[-1])
+    if testFlag:
+        print(code, name, len(days), point, gaps, fireup, grow0, grow1)
+    if isTur :
+        info                = "9.9.1 巨幅洗盘" + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", fireup, grow1, gaps, info]
+        return result
+    return False, code, name
+############################# 首板后调整中继 ###################################
+def findFstSeal(code, name, testFlag, days, half, inn):
+    close                   = days['close'].tolist()
+    amount                  = days['amount'].iloc[-1]
+    change                  = days['change'].iloc[-1]
+    fstSeal                 = days.where(days.fstS == 1).dropna().index
+    point                   = fstSeal[-1] if len(fstSeal) else 0
+    flag                    = dataWashPrice(days, 3, 5)
+    # 去除成交量太小的个股, 去除没有涨停的个股
+    if not flag or point == 0:
+        return False, code, name
+    fireup                  = close[point]
+    gaps                    = len(days) - point
+    # 去除刚开始涨或者调整小于突破价的个股
+    if gaps <= 1 or close[-1] < fireup:
+        return False, code, name
+    botNum                  = days[point:].where(days.v == -1).dropna().index
+    # 去除调整出现多次低点的个股
+    if len(botNum) > 2:
+        return False, code, name
+    # 符合条件的个股分类
+    isSeal                  = days['seal'].iloc[-1]
+    isTur                   = 1 if close[-1] == max(close[point+1:]) else 0
+    mincls                  = min(close[point+1:])
+    fw0                     = gaps + maList[-1]
+    fw1                     = gaps + maList[-2]
+    grow0                   = round(close[-1] / days['close'].tail(fw0).min(), 2)
+    grow1                   = round(close[-1] / days['close'].tail(fw1).min(), 2)
+    sclose                  = strClose(close[-1])
+    info                    = ""
+    if       isSeal and mincls >= fireup:
+        info                = "9.8.4 涨停不破"
+    elif     isSeal and mincls  < fireup and close[-1] >= fireup :
+        info                = "9.8.3 涨停跌破"
+    # 至少3天完成1个30分钟级别的调整，9天完成1个日线级别的调整
+    elif not isSeal and mincls >= fireup and isTur and gaps >= 4:
+        info                = "9.8.2 海龟不破"
+    elif not isSeal and mincls  < fireup and isTur and gaps >= 4 :
+        info                = "9.8.1 海龟跌破"
+    else:
+        info                = ""
+    if testFlag:
+        print(code, name, len(days), point, gaps, fireup, grow0, grow1)
+    if info == "" or grow0 >= 1.8 or grow1 >= 1.4:
+        return False, code, name
+    info                    += str(change).rjust(5) + "%"
+    result                  = [True, code, name.rjust(4), sclose, str(amount)+"亿", fireup, grow1, gaps, info]
+    return result
+############################# 点火放量大涨 ###################################
+def findFireup(code, name, testFlag, days, half, inn):
+    funcEntry               = False
+    flag                    = dataWashPrice(days, 3, 5)
+    if not flag:
+        return False, code, name
+    # 找出最近一次放量点
+    plist                   = days.where(days.ppeak == 1).dropna().index
+    point                   = plist[-1] if len(plist) else 0
+    lens                    = len(days)
+    gaps                    = lens - point
+    close                   = days['close'].tolist()
+    # 放量后am5最多只有1个高点和1个低点
+    mlist                   = days[point:].where(days.m != 0).dropna().index
+    mcnt                    = len(mlist)
+    if mcnt > 2 or close[-1] < close[point] :
+        return False, code, name
+    #sys.exit(0)
+
+    info                    = ""
+    if mcnt :
+        mpoint              = int(mlist[-1])
+        tp                  = int(days.m[mpoint])
+        gaps                = lens - mpoint
+        if tp == -1 and close[-1] != min(close[point:]) and gaps <= 3:
+            info            = '9.7.3 缩量结束'
+        #if tp == -1 and close[-1] >= max(close[point:]) :
+        #    info            = '9.7.2 调整结束'
+        if tp ==  1 and close[-1] >= max(close[point:]) and gaps >= 5:
+            info            = '9.7.0 缩量上涨'
+    #else :
+    #    info                = '9.7.1 放量上涨'
+        
+    amount                  = days['amount'].iloc[-1]
+    change                  = days['change'].iloc[-1]
+    grow                    = round(close[-1] / close[point], 2)
+    grow                    = round(close[-1] / days['close'].tail(60).min(), 2)
+    #flag                    = True if (amount >= 3 and change >= 5) or (amount < 3 and change >= 10) else False
+    if testFlag:
+        print(code, name, lens, point, gaps, close[point], max(close[point:]), close[-1], grow)
+        print(mlist, mcnt)
+        print(days.tail(20))
+    if info == "" or grow >= 1.32:
+        return False, code, name
+    if True:
+        sclose          = strClose(close[-1])
+        info            = info + str(change).rjust(5) + "%"
+        result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[point], grow, gaps, info]
+        return result
+    return False, code, name
+
 ############################# 长期超跌股 ###################################
 def findDecrease(code, name, testFlag, days, half, inn):
     mval                    = days['close'].tail(250).min()
@@ -85,11 +251,9 @@ def findDecrease(code, name, testFlag, days, half, inn):
         gaps                = int(len(days) - idx)
         if  gaps       <= 10 \
         and close[idx] < mval * 1.05 \
-        and close[idx] < days['ma_5'].iloc[idx]  \
-        and close[idx] < days['ma_20'].iloc[idx] \
         and close[idx] < days['ma_60'].iloc[idx] \
         and close[idx] < days['ma_144'].iloc[idx]\
-        and (days['grow'].iloc[idx+1:idx+4] > 9.9).sum():
+        and ((days['grow'].iloc[idx+1:idx+4] > 9.9).sum() or days['grow'].iloc[idx+1:idx+4].sum() >= 10):
             flag            = True
             break
     if not flag:
@@ -101,9 +265,9 @@ def findDecrease(code, name, testFlag, days, half, inn):
     grow                    = round(close[-1] / mval, 2)
     if testFlag:
         print(code, name, idx, len(days), gaps, mval, close[idx], close[-1], grow)
-    if  change >= 5 \
+    if  change >= 3 \
     and True:
-        sclose              = strClose(days['close'].iloc[-1])
+        sclose              = strClose(close[-1])
         info                = "9.9.超跌："  + str(change).rjust(5) + "%"
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[idx], grow, gaps, info]
         #print(result, grow)
@@ -164,238 +328,111 @@ def findTrence(code, name, testFlag, days, half, inn):
         print(dt.tail(5), cnt, point, bot, gaps)   
         
     if cnt <= 1 \
-    and gaps <= 10  \
+    and gaps <= 15  \
     and (change >= 2 and amount >= 2) \
+    and grow < 1.5 \
     and True:
-        sclose              = strClose(days['close'].iloc[-1])
+        sclose              = strClose(close[-1])
         info                = "9.8.吸筹：" + str(change).rjust(5) + "%"
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[bot], grow, gaps, info]
         #print(result, grow)
         return result
     return False, code, name
-############################# 寻找海归 ################################
-def findTurtle(code, name, testFlag, days, half, inn):
-    procTurtleData(days, 120)
-    turcnt                  = days['tur'].tail(1).sum()
-    cnt                     = (days['grow'].tail(120) > 9.9).sum()
-    if turcnt == 0 :
-        return False, code, name
-    # 找出最近的低点
-    close                   = days['close'].tolist()
-    dt                      = procPeakList(close, 5)
-    dt                      = dt.where(dt.type == 0).dropna()
-    bot                     = int(dt['idx'].iloc[-1])
-    gaps                    = len(days) - bot
-    avgc                    = days['change'].iloc[bot:].mean()
-    if testFlag:
-        print(code, name, cnt, len(days), bot, gaps, avgc)
-    
-    if avgc > 2 :
-        amount              = days['amount'].iloc[-1]                
-        change              = days['change'].iloc[-1]
-        minval              = days['close' ].iloc[-20:].min()
-        grow                = round(days['close'].iloc[-1] / minval, 2)
-        #if amount < 3 or change < 5 or grow > 1.35:
-        #    return False, code, name
-        sclose              = strClose(days['close'].iloc[-1])
-        info                = "9.3.海龟：" + str(change).rjust(5) + "%"
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[bot], grow, gaps, info]
-        return result
-    return False, code, name
-############################# 放量后缩量调整，或者持续放量 ############################
-def findAmount(code, name, testFlag, days, half, inn):
-    close               = days['close'].tolist()
-    if close[-1] < days['ma_5' ].iloc[-1] :
-        return False, code, name
-    if close[-1] < days['ma_20'].iloc[-1] :
-        return False, code, name
-    if close[-1] < days['ma_144'].iloc[-1] :
-        return False, code, name
-    vrate               = days['rate'].tolist()
-    nrate               = [a if a >= 2 else 0 for a in vrate]
-    haspeak             = np.nonzero(nrate)[0]
-    days['vma_5']       = days['amount'].rolling(window= 5).mean().round(decimals=2)
-    days['vma_10']      = days['amount'].rolling(window=10).mean().round(decimals=2)
-    if len(haspeak) == 0:
-        return False, code, name
-    procTurtleData(days, 60)
-    turcnt              = days['tur'].tail(1).sum()
-    if turcnt == 0 :
-        return False, code, name
-    idxpeak             = haspeak[-1]
-    idxend              = 0
-    peak                = 0
-    avrg                = 0
-    info                = "9.5.放量"
-    lens                = len(days)
-    gap                 = len(days) - idxpeak
-    minval              = days['close'].iloc[-90:].min()
-    grow                = round(close[-1] / minval,2 )
-    change              = days['change'].iloc[-1]
-    amount              = days['amount'].iloc[-1]
-    growcnt             = (days['grow'] > 7).tail(gap).sum()
-    if growcnt == 0:
-        return False, code, name        
-    if not (days['amount'].iloc[idxpeak] >= 3 or days['change'].iloc[idxpeak] >= 5):
-        return False, code, name
-    if days['vma_5'].iloc[idxpeak] < days['vma_10'].iloc[idxpeak] :
-        return False, code, name
-    #print(code, name, idxpeak, lens, gap)
-    for i in range(idxpeak, lens):
-        #print(close[i])
-        if days['vma_5'].iloc[i] < days['vma_10'].iloc[i] :
-            #print(idxpeak, idxend, lens, gap)
-            idxend      = i 
-            peak        = max(close[idxpeak:idxend])
-            avrg        = days['amount'].iloc[idxpeak:idxend].mean()
-            info        += "_缩量"
-            #print("peak start at [%d:%d], peak = %.2f" %(idxpeak, idxend, peak))
-            break
-    if idxend == 0:     # 量能继续增加
-        peak            = days['close'].iloc[idxpeak-20:idxpeak].max()
-        avrg            = days['amount'].iloc[idxpeak:].mean()
-        if amount < 3 or avrg < 2 or gap < 4:
-            return False, code, name
-        info            += "_放量"
-        #print("peak start at end[%d:%d], peak = %.2f" %(idxpeak, lens, peak))
-            
-    if close[-1]    >= peak \
-    and gap         <= 30   \
-    and change      >= 2    \
-    and grow        <= 1.5  \
-    and True :
-        sclose          = strClose(days['close'].iloc[-1])
-        info            += str(change).rjust(5) + "%"
-        result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[idxpeak], grow, str(gap).rjust(2), info]
-        return result
-    return False, code, name
-
 
 ######################################################################
 ############################# 基础处理函数 ############################
 ######################################################################
 def strClose(close):
-    baseFuncEntry       = False
     return str(close).rjust(6)
 def strMount(mount):
     return str(mount).rjust(6)+"亿"
-def getGrowFromMin(data):
-    grow                = round(data['close'].iloc[-1] / data['close'].iloc[-120:].min(), 2)
-    return grow
-def getGrowFromStage(data):
-    index               = data['close'].iloc[-20:].idxmin()
-    grow                = round(data['close'].iloc[-1] / data['close'].iloc[-20:].min(), 2)
-    return grow, index
-def getSealingNum(data):
-    grow                = data['grow'].tolist()
-    seal                = [1 if a >= 9.7 else 0 for a in grow]
-    data['seal']        = pd.DataFrame(seal)
-    data['flag']        = data['seal'].rolling(window=2).sum() == 2
-    del data['seal']
 ############################# 从文件读数据 ###########################
 def readDataFromFile(code, name, dpath, hpath):
-    empty               = pd.DataFrame()
     if not os.path.exists(dpath) :
         return False, empty, empty
-    ddata               = pd.read_csv(dpath, parse_dates=[0])
+    ddata                   = pd.read_csv(dpath, parse_dates=[0])
     ddata.sort_values('date', ascending=True, inplace=True)
-    ddata               = procMaData  (ddata)
-    #ddata               = procMacdData(ddata)
     if len(ddata) == 0:
         return False, empty, empty
-    
-    #if not os.path.exists(hpath) :
-    #    return False, ddata, empty
-    #hdata               = pd.read_csv(hpath, parse_dates=[0])
-    #hdata.sort_values('date', ascending=True, inplace=True)
-    #hdata               = procMaData  (hdata)
+    #ddata                   = procMaData  (ddata)
+    #ddata                   = procMacdData(ddata)
+    del ddata['open'], ddata['volume']
     return True, ddata, empty
-############################# 寻找有效日线 ###########################
-def getValidDays(code, name, testFlag, data):
-    # 有大阳(4%); 有海龟; 有换手率
-    df                  = data.tail(wins)
-    cntg                = len(df[df.grow   >= 1.04])    #大阳(4%)
-    cntt                = len(df[df.tur    >= 1])      #海归
-    cntm                = len(df[df.amount >= 10]) \
-                        + len(df[df.change >= 30]) \
-                        + len(df[(df.amount>=6) & (df.change>= 5)]) \
-                        + len(df[(df.amount>=4) & (df.change>=10)]) \
-                        + len(df[(df.amount>=2) & (df.change>=20)])
-    total               = cntg + cntt + cntm
-    return True if total > 0 else False
-############################# 寻找放量天数 ###########################
-def getMountDays(code, name, testFlag, data, wins):
-    df                  = data.tail(wins)
-    if testFlag:
-        #print(df)
-        print("getMountDays:", code, name, wins, len(df[(df.amount>=10)]))
-        print("getMountDays:", code, name, wins, len(df[(df.change>=30)]))
-        print("getMountDays:", code, name, wins, len(df[(df.amount>=6) & (df.change>= 5)]))
-        print("getMountDays:", code, name, wins, len(df[(df.amount>=4) & (df.change>=10)]))
-        print("getMountDays:", code, name, wins, len(df[(df.amount>=2) & (df.change>=20)]))
-    cntm                = len(df[(df.amount>=10)]) \
-                        + len(df[(df.change>=30)]) \
-                        + len(df[(df.amount>=6) & (df.change>= 5)]) \
-                        + len(df[(df.amount>=4) & (df.change>=10)]) \
-                        + len(df[(df.amount>=2) & (df.change>=20)])
-    return cntm
-############################# 寻找有效half ###########################
-def chkLastDays (code, name, testFlag, amount, change):
-    cntm                =   amount >= 10 \
-                        or  change >= 30 \
-                        or (amount >= 6 and change >=  5) \
-                        or (amount >= 4 and change >= 10) \
-                        or (amount >= 2 and change >= 20)
-    return cntm
-############################# 海龟/均线/MACD/BOLL ####################
+############################# 海龟/均线/MACD/峰值 ####################
 def procTurtleData(df, period) :
-    df['tur']               = df['close'] == df['close'].rolling(window=period).max()
+    # apply函数仿真时间是队列操作的3倍
+    df['tur']               = df.close == df.close.rolling(period).max()
+    df['tur']               = [1 if a else 0 for a in (df.tur)]
     return df
 def procMaData(df) :
     for ma in maList:
-        col                 = 'ma_' + str(ma)
-        df[col]             = df['close'].rolling(window=ma).mean().round(decimals=2)
-    return df
-def procBollData(df) :
-    for ma in bollList:
-        df['md_'+str(ma)]   = df['close'].rolling(window=ma).mean().round(decimals=2)
-        df['std_'+str(ma)]  = df['close'].rolling(window=ma).std(ddof=0).round(decimals=2)
-        df['up_'+str(ma)]   = df['md_'+str(ma)] + 2 * df['std_'+str(ma)]
-        df['dw_'+str(ma)]   = df['md_'+str(ma)] - 2 * df['std_'+str(ma)]
+        df['ma_'+str(ma)]   = df.close.rolling(ma).mean().round(decimals=2)
     return df
 def procMacdData(df) :                         
-    df['sema']              = pd.DataFrame.ewm(df['close'],span=macdFast).mean().round(decimals=6) 
-    df['lema']              = pd.DataFrame.ewm(df['close'],span=macdSlow).mean().round(decimals=6)   
-    df['dif']               = df['sema'].round(decimals=2) - df['lema'].round(decimals=6)       
-    df['dea']               = pd.DataFrame.ewm(df['dif'],span=macdMidd).mean().round(decimals=2)
-    df['macd']              = 2*(df['dif'].round(decimals=2) - df['dea'].round(decimals=2))
-    #df['dmin']              = df['dif'] == df['dif'].rolling(window=5,center=True).min()
-    #df['dmin']              = df['dif'] == df['dif'].rolling(window=7).min()
+    df['sema']              = pd.DataFrame.ewm(df.close,span=macdFast).mean().round(decimals=6) 
+    df['lema']              = pd.DataFrame.ewm(df.close,span=macdSlow).mean().round(decimals=6)   
+    df['dif']               = df.sema.round(decimals=2) - df.lema.round(decimals=6)       
+    df['dea']               = pd.DataFrame.ewm(df.dif,span=macdMidd).mean().round(decimals=2)
+    df['macd']              = 2*(df.dif.round(decimals=2) - df.dea.round(decimals=2))
     del df['sema'], df['lema']
     return df
-def procMaCross(ma1, ma2, data, close, testFlag) :
-    #data['minus']           = round((data['ma_'+str(ma1)] - data['ma_'+str(ma2)]), 4)
-    data['minus']           = round((data['close'] - data['ma_'+str(ma2)]), 4)
-    data['plus']            = round((data['minus'].shift(1) * data['minus']), 4)
-    minus                   = data['minus'].tolist()  
-    plus                    = data['plus'].tolist()    
-    cross                   = list(map(lambda x, y: 0 if x > 0 else -1 if y < 0 else 1, plus, minus))
-    lens                    = len(cross)
-    eidx                    = lens - 60 if lens > 60 else 0
-    for i in range(lens-1, eidx, -1):
-        if cross[i] == 1 and cross[i] == cross[i-1]:
-            cross[i]        = 0
-    data['cross']           = pd.DataFrame(cross)
-    del data['minus'], data['plus']
-    if testFlag:
-        print(cross)
-    
-    hdiff                   = np.diff(np.sign(np.diff(cross)))
-    peak                    = (np.where(hdiff == -2)[0] + 1).tolist()   #上穿
-    poke                    = (np.where(hdiff ==  2)[0] + 1).tolist()   #下穿
-    rsut                    = [[x, 1, close[x]] for x in peak] + [[x, -1, close[x]] for x in poke]
-    rsut.sort(reverse=False)
-    return rsut
+def procSealing(df, gap) :
+    df['price']             = round(df.grow * df.rate, 1)
+    df['seal']              = [1 if a >= 9.8 else 0 for a in (df.grow)]
+    df['fstS']              = df.seal.rolling(gap).sum()
+    df['fstS']              = [1 if a == 1 and b == True else 0 for a, b in zip(df.seal, df.fstS)]
+    return df    
+def procBasicPrice(df) :
+    isa                     = 1 if df['amount'].tail(30).max() >= 1 else 0
+    isb                     = 1 if df['change'].tail(30).max() >= 2 else 0
+    flag                    = 1 if (isa + isb) > 0 else 0
+    return flag
+def dataWashPrice (df, am, ch) :
+    amount                  = df['amount'].iloc[-1]
+    change                  = df['change'].iloc[-1]
+    flag                    = True if (amount >= am and change >= ch) or (amount < ch and change >= ch * 2) else False
+    return flag
+def procBasicInfo(df, tur, gap) :
+    baseFuncEntry           = False
+    step                    = int(gap/2)
+    index                   = len(df) - step + 1
+    # 找出5天均线的顶/底
+    for i in amList:
+        df['am'+str(i)]     = df.amount.rolling(i).mean().round(decimals=2)
+    mpeak                   = df.am5.rolling(gap, center=True).max()
+    mpoke                   = df.am5.rolling(gap, center=True).min()
+    for i in range(index, len(df) - 1):
+        mpeak[i]            = df.am5.iloc[i-step:].max()
+        mpoke[i]            = df.am5.iloc[i-step:].min()
+    df['m']                 = [1 if (a == b) else -1 if (a == c) else 0 for a, b, c in zip(df.am5, mpeak, mpoke)]
+    df['m1']                = df['m'].shift(-1)
+    df['m']                 = [a - 1 if (a == b and a ==  1) else a for a, b in zip(df.m, df.m1)]
+    df['m']                 = [a + 1 if (a == b and a == -1) else a for a, b in zip(df.m, df.m1)]
+    #df['m'].iloc[-1]         = None
+    # 找出海龟
+    df['tur']               = df.close == df.close.rolling(tur).max()
+    df['tur']               = [1 if a else 0 for a in df.tur]
+    # 找出放量大涨、涨停、首次涨停
+    df['price']             = (df.grow * df.rate).round(decimals=1)
+    df['ppeak']             = df.price == df.price.rolling(gap, center=True).max()
+    df['ppeak']             = [1 if a >= 10 and b == 1 else 0 for a, b in zip(df.price, df.ppeak)]   
+    #df['ppeak'].iloc[-1]     = None
+    df['seal']              = [1 if a >= 9.8 else 0 for a in df.grow]
+    df['fstS']              = df['seal'].rolling(gap).sum()
+    df['fstS']              = [1 if a == 1 and b == True else 0 for a, b in zip(df.seal, df.fstS)]
+    # 找出close的顶/底
+    cpeak                   = df.close.rolling(gap, center=True).max()
+    cpoke                   = df.close.rolling(gap, center=True).min()
+    for i in range(index, len(df) - 1):
+        cpeak[i]            = df.close.iloc[i-step:].max()
+        cpoke[i]            = df.close.iloc[i-step:].min()
+    df['v']                 = [1 if (a == b) else -1 if (a == c) else 0 for a, b, c in zip(df.close, cpeak, cpoke)]
+    df['v1']                = df['v'].shift(-1)
+    df['v']                 = [a - 1 if (a == b and a ==  1) else a for a, b in zip(df.v, df.v1)]
+    df['v']                 = [a + 1 if (a == b and a == -1) else a for a, b in zip(df.v, df.v1)]
+    #df['v'].iloc[-1]         = None
+    del df['m1'], df['v1']
+    return df
 ############################# 寻找波峰波谷 ############################
 def procPeakList(close, gap) :
     lens            = len(close)   
@@ -426,6 +463,35 @@ def procPeakList(close, gap) :
             rst.append(tol[i])
     df                      = pd.DataFrame(rst, columns=['idx', 'type', 'close'])
     return df
+############################# 寻找波峰波谷 ############################
+def procPeak(data, gap) :
+    df                      = pd.DataFrame(data.index)
+    df.columns              = ['idx']
+    df['close']             = data['close']
+    half                    = int(gap / 2)
+    index                   = max(data['close'].idxmin(), data['close'].idxmax()) - gap
+    df                      = df.iloc[index:]
+    df['peak']              = df['close'].rolling(gap, center=True).max()
+    df['poke']              = df['close'].rolling(gap, center=True).min()
+    peak                    = df['peak'].tolist()
+    poke                    = df['poke'].tolist()
+    for i in range(1, half):
+        #print(i, df['close'].iloc[-i-half:].tolist())
+        peak[-i]            = df['close'].iloc[-i-half:].max()
+        poke[-i]            = df['close'].iloc[-i-half:].min()
+    df['peak']              = peak
+    df['poke']              = poke
+    df['v']                 = df.apply(lambda x: 1 if (x.close == x.peak) else -1 if (x.close == x.poke) else 0, axis=1)
+    #print(len(df))
+    #print(df.tail(10))
+    df                      = df.where(df.v != 0).dropna()
+    df['v1']                = df['v'].shift(-1)
+    df['v']                 = df.apply(lambda x: x.v - 1 if (x.v == x.v1 and x.v ==  1) else x.v, axis=1)
+    df['v']                 = df.apply(lambda x: x.v + 1 if (x.v == x.v1 and x.v == -1) else x.v, axis=1)
+    df                      = df.where(df.v != 0).dropna()
+    #print(df.tail(20))
+    del df['peak'], df['poke'], df['v1']
+    return df
 #####################################################################
 ############################# 基础函数结束 ###########################
 #####################################################################
@@ -434,30 +500,10 @@ def procPeakList(close, gap) :
 
 
 
-
-
-
-
 #####################################################################
 ############################# 无效函数 ###############################
 #####################################################################
-############################# 封单额/成交额 > 2 ########################
-def findSealing(code, name, testFlag, days, half, inn):
-    # 内盘：主动卖； 外盘：主动买，涨停时外盘0为封一字; 外盘越少，买方越强势
-    if inn['封单额'].iloc[-1] != "--  " and inn['涨幅%'].iloc[-1] > "0":
-        amount              = round(float(inn['总金额'].iloc[-1]) / 10000, 2)
-        sealing             = round(float(inn['封单额'].iloc[-1]) / 10000, 2)
-        rate                = round(sealing / amount, 2)
-        grab                = 1 if rate > 0.8  else 0  # 封单 > 成交量，抢筹
-        amplitude           = 1 if float(inn['振幅%'].iloc[-1]) == 0 else 0  # 振幅为0，一字板
-        change              = days['change'].iloc[-1]
-        sclose              = strClose(days['close'].iloc[-1])
-        if grab or amplitude:
-            info            = "9.9.大单封停:" if grab else "9.9.一字涨停:" if amplitude else ""
-            info            += str(change).rjust(5) + "%"
-            result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", str(sealing)+"亿", str(rate).rjust(2), info]
-            return result
-    return False, code, name
+    
 ############################# 巨量换手/振幅 ############################
 def findChange(code, name, testFlag, days, half, inn):
     close                   = days['close'].iloc[-1]
@@ -540,46 +586,5 @@ def findLimitup(code, name, testFlag, days, half, inn):
             result          = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
             return result
     return False, code, name
-############################# 连续涨停后调整 ############################
-def findContinue(code, name, testFlag, days, half, inn):
-    getSealingNum(days)
-    flag                    = days['flag'].tolist()
-    haspeak                 = np.nonzero(flag)[0]
-    if len(haspeak) == 0:
-        return False, code, name
-    
-    idx                     = haspeak[-1]
-    gaps                    = len(days) - idx
-    close                   = days['close'].tolist()
-    peak                    = close[idx]
-    amount                  = days['amount'].iloc[-1]                
-    change                  = days['change'].iloc[-1]
-    mval                    = days['close'].iloc[idx:].min()
-    grow                    = round(close[-1] / min(close[-90:]), 2)
-    sclose                  = strClose(close[-1])
-    
-    procTurtleData(days, 30)
-    turcnt              = days['tur'].tail(3).sum()
-    if  mval >= peak and close[-1] == max(close[idx:]) \
-    and grow <= 1.62\
-    and gaps <= 15  \
-    and gaps >= 3   \
-    and turcnt >= 1 \
-    and True :
-        info                = "9.7.连涨不调整:" + str(change).rjust(5) + "%"
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
-        return result
-    
-    if  mval <  peak and close[-1] >= (peak * 0.99) \
-    and close[-1] >= days['ma_10'].iloc[-1] \
-    and close[-1] >= days['ma_5' ].iloc[-1] \
-    and close[-1] >= mval \
-    and grow <  1.62\
-    and gaps <= 15  \
-    and gaps >= 3   \
-    and True :
-        info                = "9.7.连涨调整:" + str(change).rjust(5) + "%"
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", grow, gaps, info]
-        return result
-    return False, code, name
+
 #####################################################################
