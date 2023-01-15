@@ -9,7 +9,8 @@ Created on Mon Oct 10 22:59:41 2016
 
 import os, sys, datetime, calendar#, codecs, chardet
 import re
-import pandas  as pd
+import pandas as pd
+import numpy  as np
 
 import smtplib
 from email.mime.text import MIMEText
@@ -28,19 +29,23 @@ dayipath                = "C:\\new_tdx\\T0001\\export\\d\\"         #日线原�
 minipath                = "C:\\new_tdx\\T0001\\export\\m\\"         #5分钟原始数据
 basepath                = "C:\\new_tdx\\T0001\\export\\"            #基础原始数据
 
-halfpath                = workpath + "HalfPath\\"                   #half输出
 dayspath                = workpath + "DaysPath\\"                   #日线输出
 weekpath                = workpath + "WeekPath\\"                   #周线输出
+mothpath                = workpath + "MothPath\\"                   #月线输出
 rsltpath                = workpath + "RsltPath\\"                   #统计结果
 drawType                = []                                        #半小时/日线/周线
 codeList                = []
 codeName                = []
-
 baseInfo                = pd.DataFrame()
 baseFile                = ""
+
+plateList               = []
+plateName               = []
+plateInfo               = pd.DataFrame()
+plateFile               = ""
+
 amountUnit              = 100000000                                 #1亿
 volumeUnit              = 1000000                                   #1万手
-
 ######################################################################
 ############################# 获取基本信息 ############################
 ######################################################################
@@ -50,8 +55,8 @@ def getWorkDay(now):
     year                = now.year
     month               = now.month
     day                 = now.day
-    hour                = now.hour   
-    day                 = day - 1 if hour < 15 else day  
+    hour                = now.hour  
+    day                 = day - 1 if hour < 15 else day
     lastweek            = calendar.weekday(year, month, day)
     weekday             = now.weekday() + 1
     print("%s :: line %3d : ############### weekday = %s"\
@@ -74,46 +79,132 @@ def getLastWorkDay(now, endDate):
 ############################# 获取股票code/name ######################
 def getStockCode(endDate) : 
     global codeList, codeName, baseInfo, baseFile
-    # 获取基础信息
-    find                    = False
-    for i in os.listdir(basepath):
-        if endDate in i:
-            base            = os.path.join(basepath, i)
-            baseInfo        = pd.read_csv(base, sep='\t', encoding='gbk')
-            baseInfo        = baseInfo[:-1]
-            codeName        = baseInfo['名称'].tolist()
-            codeList        = baseInfo['代码'].tolist()
-            find            = True
-            baseFile        = base
-            print("%s :: line %3d : ############### allNum  = %d\n"\
-            %("comDef", sys._getframe().f_lineno, len(baseInfo))) 
-            break
-    if not find :
-        print("%s :: line %d : Error! day's base info don't exist" \
-        %("comDef", sys._getframe().f_lineno))
+    baseFile            = basepath + "\\沪深Ａ股" + endDate + ".xls"    
+    if not os.path.exists(baseFile) :
+        print("%s :: line %3d : ############### %s socketFile not exists"\
+        %("comDef", sys._getframe().f_lineno, baseFile))
         sys.exit(0)
+    else:
+        baseInfo        = pd.read_csv(baseFile, sep='\t', encoding='gbk')
+        baseInfo        = baseInfo[:-1]
+        codeName        = baseInfo['名称'].tolist()
+        codeList        = baseInfo['代码'].tolist()
+        print("%s :: line %3d : ############### CodeNum  = %d\n"\
+        %("comDef", sys._getframe().f_lineno, len(baseInfo))) 
     # 获取代码, 原始code格式 '="000001"'
     for i in os.listdir(dayipath):
         char                = '="' + str(i)[2:] + '"'
         if char in codeList:
-            index               = codeList.index(char)
-            codeList[index]     = i
-        else:
-            print("%s :: line %d : Error! code : %s's not exist" \
-            %("comDef", sys._getframe().f_lineno, char))
-            #sys.exit(0)
-
-############################# 设置half/日线/周线使能 ##################
-def setUpdateHalfEn(flag):
-    global drawType
-    drawType.append('half')
+            idx             = codeList.index(char)
+            codeList[idx]   = i
+def getPlateCode(endDate) : 
+    global plateList, plateName, plateInfo, plateFile
+    plateFile               = basepath + "\\板块指数" + endDate + ".xls"    
+    if not os.path.exists(plateFile) :
+        print("%s :: line %3d : ############### %s plateFile not exists"\
+        %("comDef", sys._getframe().f_lineno, plateFile))
+        sys.exit(0)
+    else:
+        plateInfo       = pd.read_csv(plateFile, sep='\t', encoding='gbk')
+        plateInfo       = plateInfo[:-1]
+        plateName       = plateInfo['名称'].tolist()
+        plateList       = plateInfo['代码'].tolist()
+        print("%s :: line %3d : ############### PlatesNum  = %d\n"\
+        %("comDef", sys._getframe().f_lineno, len(plateInfo)))
+    plateList           = [ "SH"+a.replace("\"", "").replace("=", "") for a in plateList]
+############################# 股票复盘 ###############################
+def getDaysReplay(endDate):
+    global rsltpath, baseFile
+    df                  = pd.read_csv(baseFile, sep='\t', encoding='gbk')
+    print("\n%s :: line %3d : ############### replay with stockNum = %d"\
+    %("plateApi", sys._getframe().f_lineno, len(df)))
+        
+    df.drop(df.tail(1).index, inplace=True)             # drop last rows
+    df['amount']        = round(df['总金额'] / 10000, 2)
+    summ                = df['amount'].sum()
+    midd                = df['amount'].median()
+    avrg                = df['amount'].mean()
+    print("成交总额(%.1f)亿, 中位数(%.1f)亿, 平均数(%.1f)亿" %(summ, midd, avrg))
+    
+    df['grow']          = [0 if a == '--  ' else float(a) for a in df['涨幅%']]
+    upnum               = len(df[df['grow'] >  0.0])
+    dwnum               = len(df[df['grow'] <  0.0])
+    flnum               = len(df[df['grow'] == 0.0])
+    midd1               = df['grow'].median()
+    avrg1               = df['grow'].mean()
+    grow10              = len(df[df['grow'] >= 9.7])
+    grow05              = len(df[df['grow'] >=   5])
+    down10              = len(df[df['grow'] <=-9.7])
+    down05              = len(df[df['grow'] <=  -5])
+    print("上涨个数(%4d), 下跌个数(%4d), 平盘个数(%4d), 涨幅中位数(%.1f), 平均数(%.1f)" %(upnum, dwnum, flnum, midd1, avrg1))
+    print("涨停个数(%4d), >=5个数(%4d)" %(grow10, grow05))
+    print("跌停个数(%4d), <=5个数(%4d)" %(down10, down05))
+    
+    df['change']        = [0 if a == '--  ' else float(a) for a in df['换手%']]
+    dt                  = df[['代码', '名称', 'amount', 'change', 'grow']]
+    ch                  = dt[dt['amount'] >= 10]
+    ch                  = ch[ch['change'] >= 10]
+    ch                  = ch[ch['grow']   >=  0]
+    ch                  = ch.sort_values('amount', ascending=False)
+    print("成交(10亿)换手( 5%%)个数(%4d)" %(len(ch)) )
+    print(ch)
+def getPlatReplay(endDate, testFlag, testList):
+    global rsltpath, plateList, plateName
+    if not testFlag:
+        iputList        = [[a, b] for a, b in zip(plateList, plateName)]
+    else:
+        iputList        = [[a, plateName[plateList.index(a)]] for a in testList]
+    print("\n%s :: line %3d : ############### 处理板块 with PlateNum = %d"\
+    %("comDef", sys._getframe().f_lineno, len(iputList)))
+        
+    starttime           = datetime.datetime.now() 
+    update_plate        = []
+    for i in range (len(iputList)) :
+        code            = iputList[i][0]
+        name            = iputList[i][1]
+        daysfile        = dayipath + code
+        if not os.path.exists(daysfile) :
+            print(code, name, daysfile, "not exist")
+            continue
+        
+        data            = pd.read_csv(daysfile,encoding='gbk',header=2)
+        data            = data.iloc[:-1]
+        data.columns    = ['date','open','high','low','close','volume','amount']
+        data            = data[~data['volume'].isin([0])] 
+        data['amount']  = (data['amount'] / amountUnit).round(decimals=1)
+        data.sort_values('date', ascending=True, inplace=True)
+        if len(data) <= 1:
+            continue
+        procPlateInfo(data, 20, 10)
+        rst             = findPlateBuy(code, name, testFlag, data)
+        if str(rst[0]) == 'True':
+            update_plate.append(rst)
+    endtime             = datetime.datetime.now()
+    print("%s :: line %3d : update_succ_num = %d，use time = %s Second"\
+    %("comDef", sys._getframe().f_lineno, len(iputList), (endtime - starttime).seconds))
+    if update_plate :
+        df              = pd.DataFrame(update_plate)
+        df.columns      = ['flag', 'code', 'name', 'close', 'amount', 'bot', 'grow', 'days', 'info']
+        del df['flag']
+        df.sort_values('info', ascending=False, inplace=True)
+        print(df)            
+def procPlateInfo(df, tur, gap) :
+    df['volume']        = ( df['volume'] / 10000     ).round(decimals=1)
+    df['grow']          = ((df['close']  / df['close'].shift(1) - 1) * 100).round(decimals=2)
+    df['rate']          = ((df['amount'] / df['amount'].shift(1)- 1) * 100).round(decimals=1)
+    procBasicInfo(df, tur, gap)
+######################################################################
+############################# 设置日线/周线/月线使能 ##################
 def setUpdateDaysEn(flag):
     global drawType
     drawType.append('days')
 def setUpdateWeekEn(flag):
     global drawType
-    drawType.append('week')  
-############################# 处理half/天/周线数据 ####################
+    drawType.append('week') 
+def setUpdateMothEn(flag):
+    global drawType
+    drawType.append('moth')
+############################# 处理天/周/月线数据 ####################
 def procInitStockData(endDate) :   
     global codeList, codeName
     output                      = rsltpath + endDate
@@ -126,17 +217,14 @@ def procInitStockData(endDate) :
         update_fail             = []
         starttime               = datetime.datetime.now()  
         if not os.path.exists(update_file) :
-            print("%s :: line %3d : ############### update %s with codeNum = %d"\
+            print("%s :: line %3d : ############### update %s with SocketNum = %d"\
             %("comDef", sys._getframe().f_lineno, tp, len(codeList)))
             for i in range(len(codeList)):
                 code            = codeList[i]
                 name            = codeName[i]
                 flag            = getUpdateMap(endDate, code, name, tp)
                 #print(i, len(codeList), endDate, code, name, tp, flag)
-                if flag == True:
-                    update_list.append([code, name])
-                else:
-                    update_fail.append([code, name])
+                update_list.append([code, name]) if flag else update_fail.append([code, name])
                 if i > 0 and (i % 2000 == 0):
                     endtime = datetime.datetime.now()
                     print("%s :: line %3d : update_succ_num = %d，use time = %s Second"\
@@ -152,22 +240,22 @@ def procInitStockData(endDate) :
             if update_fail :
                 print("%s :: line %3d : update_fail : %s"\
                 %("comDef", sys._getframe().f_lineno, update_fail))
-############################# 处理half/日线/周线数据 ###################  
+############################# 处理日线/周线/月线数据 ###################  
 def getChangeRate(name, data) :     # 计算换手率
     global baseInfo
     nameList            = baseInfo['名称'].tolist()
     idx                 = nameList.index(name)
-    volume              = baseInfo['流通股(亿)'].loc[idx]
-    data['change']      = (data['volume'] / float(volume)).round(decimals=1)
+    volume              = baseInfo['流通股(亿)'][idx]
+    data['change']      = (data['volume'] / float(volume)).round(decimals=2)
     return data
 def getUpdateMap(endDate, code, name, tp) :
-    if tp == 'half':    # 输入5min，输出half
-        ifile           = minipath + code
-        ofile           = halfpath + code
+    if tp == 'moth':
+        ifile           = dayipath + code
+        ofile           = mothpath + code
     elif tp == 'days':
         ifile           = dayipath + code   
         ofile           = dayspath + code
-    elif tp == 'week':  # 输入days，输出week
+    elif tp == 'week':
         ifile           = dayipath + code
         ofile           = weekpath + code
     else:
@@ -181,38 +269,27 @@ def getUpdateMap(endDate, code, name, tp) :
     data                    = pd.read_csv(ifile,encoding='gbk',header=2)
     data                    = data.iloc[:-1]
     if (len(data)):
-        if tp == 'half':
-            data.columns    = ['date','time','open','high','low','close','volume','amount']
-            #合并年/月/日/小时/分钟
-            data['time']    = data['time'].astype('int')
-            timelist        = data['time'].tolist()
-            datelist        = data['date'].tolist()
-            hour            = [str(x).zfill(4)[0:2]+":"+str(x).zfill(4)[2:] for x in timelist] 
-            date            = [x.replace('/', '-') for x in datelist]
-            data['hour']    = pd.DataFrame(hour)
-            data['date']    = pd.DataFrame(date)  
-            data["date"]    = data["date"].map(str) + " " + data["hour"].map(str)
-            data.drop(['time','hour'], axis=1, inplace=True)
+        data.columns        = ['date','open','high','low','close','volume','amount']
+        data                = data[data['open'].notnull()]
+        data                = data[~data['volume'].isin([0])]
+        data['amount']      = round( data['amount'] / amountUnit, 2).round(decimals=2)
+        data['volume']      = round( data['volume'] / volumeUnit, 2).round(decimals=2)
+        data                = getChangeRate(name, data)
+        #data['rate']        = round((data['amount'] / data['amount'].shift(1)), 1)
+        if tp == 'days':
+            data['grow']    = round(((data['close'] / data['close' ].shift(1) - 1) * 100), 2)
+            del data['open'], data['high'], data['low']
+            procBasicInfo(data, 60, 10)
+            data.to_csv(ofile, index=False)
+            return True
+        else:           #保存周线数据
+            del data['open'], data['high'], data['low']
             return getMergData(code, name, endDate, tp, data, ofile)
-        else:
-            data.columns    = ['date','open','high','low','close','volume','amount']
-            data            = data[data['open'].notnull()]
-            data            = data[~data['volume'].isin([0])]
-            if tp == 'days':
-                data['grow']    = round(((data['close'] / data['close' ].shift(1) - 1) * 100), 2)
-                data['rate']    = round((data['amount'] / data['amount'].shift(1)), 1)
-                data['amount']  = round( data['amount'] / amountUnit, 2).round(decimals=2)
-                data['volume']  = round( data['volume'] / volumeUnit, 2).round(decimals=2)
-                data            = getChangeRate(name, data)
-                data.to_csv(ofile, index=False)
-                return True
-            else:           #保存周线数据
-                return getMergData(code, name, endDate, tp, data, ofile)
 ############################# 合并half/周线数据 ######################## 
 def getMergData(code, name, endDate, otype, data, ofile) :
-    period              = "0.5H"   if otype == "half" else "W"
+    period              = "W" if otype == "week" else "M"
     data['date']        = pd.to_datetime(data['date']) #把字符串转换成时间信息
-    dt                  = data['date'].loc[-1]  
+    dt                  = data.date.iloc[-1]
     dt                  = datetime.datetime.strptime(str(dt),"%Y-%m-%d %H:%M:%S")     
     lastDate            = str(dt.year) + str(dt.month).zfill(2) + str(dt.day).zfill(2)
     if lastDate != endDate :
@@ -220,31 +297,28 @@ def getMergData(code, name, endDate, otype, data, ofile) :
     
     data                = data.set_index('date')
     df2                 = data.resample          (period,closed="right",label="right").last()
-    df2['open']         = data['open'].resample  (period,closed="right",label="right").first().round(decimals=2) 
-    df2['high']         = data['high'].resample  (period,closed="right",label="right").max().round(decimals=2) 
-    df2['low']          = data['low'].resample   (period,closed="right",label="right").min().round(decimals=2) 
-    df2['close']        = data['close'].resample (period,closed="right",label="right").last().round(decimals=2)    
-    df2['volume']       = data['volume'].resample(period,closed="right",label="right").sum().round(decimals=0)  
-    df2['amount']       = data['amount'].resample(period,closed="right",label="right").sum().round(decimals=1)             
+    #df2['open']         = data['open'].resample  (period,closed="right",label="right").first().round(decimals=2) 
+    #df2['high']         = data['high'].resample  (period,closed="right",label="right").max().round(decimals=2) 
+    #df2['low']          = data['low'].resample   (period,closed="right",label="right").min().round(decimals=2) 
+    df2['close']        = data['close' ].resample(period,closed="right",label="right").last().round(decimals=2)    
+    df2['volume']       = data['volume'].resample(period,closed="right",label="right").sum().round(decimals=1)  
+    df2['amount']       = data['amount'].resample(period,closed="right",label="right").sum().round(decimals=1)
+    df2['change']       = data['change'].resample(period,closed="right",label="right").sum().round(decimals=2)       
     df2                 = df2[~df2['volume'].isin([0])]
-    df2['grow']         = round(((df2['close'] / df2['close'].shift(1) - 1) * 100), 2)
-    df2['rate']         = round((df2['amount'] / df2['amount'].shift(1)), 1)
-    df2['amount']       = round( df2['amount'] / amountUnit, 2).round(decimals=1)
-    df2['volume']       = df2['volume'] // volumeUnit
-    #print(code, name)
-    df2                 = getChangeRate(name, df2)
+    # 每执行100次消耗120s，非常慢
+    #df2['grow']         = round(((df2['close'] / df2['close'].shift(1) - 1) * 100), 2)
+    #df2['rate']         = round((df2['volume'] / df2['volume'].shift(1)), 1)
     df2.reset_index(inplace=True)
     df2.to_csv(ofile, index=False)
-    #print(df2)
+    #print(df2.tail(5))
     #sys.exit(0)
     return True
-
 ######################################################################
 ############################# 处理自选股票 ############################
 ######################################################################
 def getStockImage(endDate, testFlag, testCode):
     global codeList, codeName, baseInfo, baseFile
-    output              = rsltpath + endDate
+    output                      = rsltpath + endDate
     if not os.path.exists(output) :
         print("%s :: line %3d : ############### merge data before process\n"\
         %("comDef", sys._getframe().f_lineno))
@@ -299,10 +373,10 @@ def getStockImage(endDate, testFlag, testCode):
                 if int(value['总金额'].iloc[-1]) == 0:
                     continue
                     
-                hfile           = halfpath + code
+                mfile           = mothpath + code
                 dfile           = dayspath + code
                 wfile           = weekpath + code
-                flag            = getStockBuy(code, name, baseInfo, testFlag, hfile, dfile, wfile, value)
+                flag            = getStockBuy(code, name, baseInfo, testFlag, mfile, dfile, wfile, value)
                 #print(i, endDate, code, name, flag)
                 if flag[0] == True:
                     process_list.append(flag)

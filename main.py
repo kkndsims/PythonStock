@@ -10,25 +10,27 @@ from   plateApi    import *
 if __name__ == '__main__' :
     endDate             = getWorkDay(datetime.datetime.now())
     befDate             = getLastWorkDay(datetime.datetime.now(), endDate)
-    #endDate             = '20220930'
+    #endDate             = '20221230'
     
     getStockCode(endDate)       #获取股票中文名称
-    #getPlateCode()              #获取板块中文名称
+    #getPlateCode(endDate)       #获取板块中文名称
     
-    setUpdateDaysEn (True)      #使能处理日线数据    
-    #setUpdateHalfEn (False)      #使能处理half数据
-    #setUpdateWeekEn (True)      #使能处理周线数据
-    procInitStockData(endDate)  #处理half/days/week数据
+    setUpdateDaysEn (True)      #使能处理日线数据
+    setUpdateWeekEn (True)      #使能处理周线数据
+    setUpdateMothEn (True)      #使能处理月线数据
+    procInitStockData(endDate)  #处理days/week/month数据
     
     testList            = []
-    #testList            = ['SH605188']  #上证
-    #testList            = ['SZ001299']  #深证
+    #testList            = ['SH600153']  #上证
+    #testList            = ['SZ003012']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         
-    testList            = []
-    #getDaysReplay(endDate, codeList + plateList, codeName, plateName)
-    #getPlateImage(endDate, plateList, plateName, testFlag, testList)
+    testList            = []    
+    #testList            = ['SH880350']
+    testFlag            = True if testList else False
+    #getDaysReplay(endDate)
+    #getPlatReplay(endDate, testFlag, testList)
       
     sendFlag            = True
     #sendFlag            = False
