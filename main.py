@@ -21,8 +21,8 @@ if __name__ == '__main__' :
     procInitStockData(endDate)  #处理days/week/month数据
     
     testList            = []
-    #testList            = ['SH600153']  #上证
-    #testList            = ['SZ003012']  #深证
+    #testList            = ['SH600128']  #上证
+    #testList            = ['SZ300709']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         
@@ -33,7 +33,7 @@ if __name__ == '__main__' :
     #getPlatReplay(endDate, testFlag, testList)
       
     sendFlag            = True
-    #sendFlag            = False
+    sendFlag            = False
     if sendFlag and not testFlag  :
         print("\n%s :: line %3d : ############### 发送邮件 ###############"\
         %("comDef", sys._getframe().f_lineno))            
