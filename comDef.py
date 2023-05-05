@@ -10,7 +10,6 @@ Created on Mon Oct 10 22:59:41 2016
 import os, sys, datetime, calendar#, codecs, chardet
 import re
 import pandas as pd
-import numpy  as np
 
 import smtplib
 from email.mime.text import MIMEText
@@ -217,7 +216,7 @@ def procInitStockData(endDate) :
         update_fail             = []
         starttime               = datetime.datetime.now()  
         if not os.path.exists(update_file) :
-            print("%s :: line %3d : ############### update %s with SocketNum = %d"\
+            print("%s :: line %3d : ############### merge %s with SocketNum = %d"\
             %("comDef", sys._getframe().f_lineno, tp, len(codeList)))
             for i in range(len(codeList)):
                 code            = codeList[i]
@@ -278,8 +277,8 @@ def getUpdateMap(endDate, code, name, tp) :
         #data['rate']        = round((data['amount'] / data['amount'].shift(1)), 1)
         if tp == 'days':
             data['grow']    = round(((data['close'] / data['close' ].shift(1) - 1) * 100), 2)
-            del data['open'], data['high'], data['low']
-            procBasicInfo(data, 60, 10)
+            #del data['open'], data['high'], data['low']
+            #procBasicInfo(data, 60, 10)
             data.to_csv(ofile, index=False)
             return True
         else:           #保存周线数据
