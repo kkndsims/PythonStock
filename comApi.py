@@ -12,12 +12,13 @@ import sys
 import pandas as pd
 import numpy  as np
 import warnings
+from scipy import signal
 warnings.filterwarnings( "ignore" )
 
 maList                  = [5, 20, 60, 144] 
 amList                  = [5, 10]    
 wkList                  = [5, 10, 20, 30]
-mtList                  = [5, 10]
+voList                  = [5, 10]
 
 isMacdMode              = 0     #0:short; 1:long
 macdFast                = 24 if isMacdMode == 1 else 12
@@ -54,12 +55,18 @@ def getStockBuy(code, name, baseInfo, testFlag, mfile, dfile, wfile, info):
         if findEnab :                   # 连板 + 反包
             result      = findSealing(code[2:], name, testFlag, days, info, 9)
             if result : return result
-        if findEnab :                   # 盘整结束破前高
+        if findEnab and 0:                   # 盘整结束破前高
             result      = findDaysContinue(code[2:], name, testFlag, days, 120, 20, 8)
             if result : return result
-        #if findEnab and 0:
-        #    result      = findDaysDif(code[2:], name, testFlag, days, 120, 20, "9.6 D.DIF_")
-        #    if result : return result  
+        if findEnab and 0:
+            result      = findDaysBot(code[2:], name, testFlag, days, 120, 20)
+            if result : return result  
+        if findEnab and 0:
+            result      = findDaysTop(code[2:], name, testFlag, days, 120, 20)
+            if result : return result
+        if findEnab and 1:
+            result      = findVolBuy(code[2:], name, testFlag, days, 120, 20)
+            if result : return result 
            
     if mothEnab or weekEnab :
         #去除成交不足或不够活跃的个股
@@ -208,6 +215,163 @@ def findDaysContinue(code, name, testFlag, df, period, delta, qos):
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", vec, grow, gaps, info]
         return result
     return []
+############################# 日线调整 ##########################
+def findDaysBot(code, name, testFlag, df, period, delta):
+    funcEntry               = False
+    procMacdData(df)            # 获取dif，dea 
+    
+    vlist                   = df.v.where(df.v != 0).dropna().tolist()
+    vidx                    = df.v.where(df.v != 0).dropna().index
+    if not vlist : return []
+    point                   = vidx[-1] if len(vidx) else 0
+    gaps                    = len(df) - point - 1
+    dif                     = df['dif'].tolist()
+    dea                     = df['dea'].tolist()
+    close                   = df['close'].tolist()
+    change                  = df.change.iloc[-1]
+    amount                  = df.amount.iloc[-1]
+    info                    = ""
+    # 有低点
+    if dif[-1] <= 0 : return []
+    if dif[-1] <= dea[-1] : return []
+    if vlist[-1] == -1 :
+        if dif[point] >= dea[point] and dea[point] >= 0:
+            info            = "9.8 High " + str(change).rjust(5) + "%"
+        if dif[point] < dea[point] and dif[point] >= -0.2:
+            info            = "9.7 Low "  + str(change).rjust(5) + "%"
+        if testFlag:
+            print(code, name, len(df), "bot:", point, gaps, info)
+        
+    if info == "" : return []              
+    minval                  = df['close'].tail(90).min()
+    grow                    = round(close[-1] / minval, 2)
+    if True\
+    and grow < 2 \
+    and ((change >= 5 and amount >= 3) or (change >= 2 and amount >= 5)) \
+    and True :
+        sclose              = strClose(close[-1])
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
+        return result
+    return []
+############################# 日线调整 ##########################
+def findDaysTop(code, name, testFlag, df, period, delta):
+    funcEntry               = False
+    procMacdData(df)            # 获取dif，dea
+    
+    peaks                   = signal.find_peaks(df.close, distance=10)[0]
+    if len(peaks) == 0 : return []
+    point                   = peaks[-1]
+    gaps                    = len(df) - point - 1
+    if gaps > 5 : return []
+    dif                     = df['dif'].tolist()
+    dea                     = df['dea'].tolist()
+    close                   = df['close'].tolist()
+    change                  = df.change.iloc[-1]
+    amount                  = df.amount.iloc[-1]
+    info                    = ""
+    # 有低点
+    if dif[-1] <= 0 : return []
+    if dif[-1] <= dea[-1] : return []
+    if True :
+        if dif[point] >= dea[point] and dea[point] >= 0:
+            info            = "9.6 unkown " + str(change).rjust(5) + "%"
+        if dif[point] < dea[point] and dif[point] >= -0.2:
+            info            = "9.5 unkown "  + str(change).rjust(5) + "%"
+        if testFlag:
+            print(code, name, len(df), "bot:", point, gaps, info)
+        
+    if info == "" : return []              
+    minval                  = df['close'].tail(90).min()
+    grow                    = round(close[-1] / minval, 2)
+    if True\
+    and grow < 2 \
+    and df.tur.iloc[-1] \
+    and ((change >= 5 and amount >= 3) or (change >= 2 and amount >= 5)) \
+    and True :
+        sclose              = strClose(close[-1])
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
+        return result
+    return []
+############################# 日线调整 ##########################
+def findVolBuy(code, name, testFlag, df, period, delta):
+    funcEntry               = False
+    gap                     = 5
+    procMacdData(df)
+
+    for ma in voList:
+        df['vol'+str(ma)]   = df.volume.rolling(ma).mean().round(decimals=2)
+        
+    df['shtv']              = df.volume.shift(1)
+    df['sht5']              = df.vol5.shift(1)
+    df['sht10']             = df.vol10.shift(1)
+    # continue 2days vol >= ma5/ma10
+    df['fire']              = [1 if a>=max(b,c) and d>=max(e,f) else 0 \
+                              for a,b,c,d,e,f in zip\
+                              (df.shtv, df.sht5, df.sht10, df.volume, df.vol5, df.vol10)]
+    # price grow together
+    df['cmin']              = df.close.rolling(gap).min()
+    df['cmax']              = df.close.rolling(gap).max()
+    df['cgrow']             = [(b/c) if a else 0 \
+                              for a,b,c in zip(df.fire, df.cmax, df.cmin)]
+    df['vbuy']              = [1 if a >= 1.07 else 0 \
+                              for a in df.cgrow]
+    # keep first vol fireup
+    df['csum']              = df.vbuy.rolling(gap).sum()
+    df['vbuy']              = [1 if a==1 and b==1 else 0\
+                              for a,b in zip(df.vbuy, df.csum)]
+    del df['shtv'], df['sht5'], df['sht10']
+    del df['cmin'], df['cmax'], df['cgrow']
+    #del df['fire'], df['csum']
+    for ma in voList:
+        del df['vol'+str(ma)]
+    
+    info                    = ""
+    blist                   = df.where(df.vbuy == 1).dropna().index
+    if len(blist) == 0: return []
+    bpoint                  = int(blist[-1])
+    gaps                    = len(df) - bpoint - 1
+    close                   = df.close.tolist()
+    if testFlag:
+        print(code, name, blist, len(df), bpoint, gaps, close[bpoint], close[-1])
+    
+    # check between last 2 vbuys
+    if gaps <= 4 and len(blist) >= 2:
+        b2p                 = int(blist[-2])
+        cmax                = max(close[b2p:bpoint])
+        difmin              = df.dif[b2p:bpoint].min()
+        if close[-1] >= cmax and difmin >= 0:
+            info            = "8.9 Vol S "
+            
+    if gaps > 4:
+        vlist               = df.iloc[bpoint:].where(df.v == 1).dropna().index
+        vnum                = len(vlist)
+        seal                = df.seal.iloc[bpoint:].sum()
+        if vnum == 0 :
+            cmin            = min(close[bpoint:])
+            if cmin >= close[bpoint] and close[-1] == max(close[bpoint:]) and seal :
+                info        = "8.8 Vol A "
+        
+        if vnum == 1:
+            vpoint          = int(vlist[0])
+            if close[-1] >= close[vpoint] and close[-1] >= close[bpoint] and seal :
+                info        = "8.7 Vol B "
+    if info == "" : return []
+    
+    minval                  = df['close'].tail(90).min()
+    grow                    = round(close[-1] / minval, 2)
+    change                  = df.change.iloc[-1]
+    amount                  = df.amount.iloc[-1]
+    if True \
+    and grow < 1.5 \
+    and ((amount >= 2 and change >= 10) or (amount >= 3 and change >=5) or amount >= 6) \
+    and True :
+        sclose              = strClose(close[-1])
+        info               += str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
+        return result
+        print(df.tail(20))
+        sys.exit(0)
+    return []
 ############################# 寻找最近的最大换手率， 且日线大于最大换手率的成本 ##########################
 def getLongMaxVolPoint(code, name, testFlag, df, period, delta, grgap, qos):
     funcEntry               = False
@@ -333,22 +497,16 @@ def procBasicInfo(df, tur, gap) :
 def procMacdData(df) :                         
     df['sema']              = pd.DataFrame.ewm(df.close,span=macdFast).mean().round(decimals=6) 
     df['lema']              = pd.DataFrame.ewm(df.close,span=macdSlow).mean().round(decimals=6)   
-    df['dif']               = (df.sema - df.lema).round(decimals=2)       
-    df['dea']               = pd.DataFrame.ewm(df.dif,span=macdMidd).mean().round(decimals=2)
-    df['macd']              = 2*(df.dif.round(decimals=2) - df.dea.round(decimals=2))
-    del df['sema'], df['lema'], df['macd']
-    #df['dlt']               = df['dif'] - df['dea']
-    #step                    = int(macdSlow/2)
-    #index                   = 0 if len(df) < step else len(df) - step + 1
-    #peak                    = df.dlt.rolling(macdSlow, center=True).max()
-    #poke                    = df.dlt.rolling(macdSlow, center=True).min()
-    #for i in range(index, len(df) - 1):
-    #    peak[i]             = df.dlt.iloc[i-step:].max()
-    #    poke[i]             = df.dlt.iloc[i-step:].min()
-    #df['p']                 = [1 if (a == b) else -1 if (a == c) else 0 for a, b, c in zip(df.dlt, peak, poke)]
-    #df['p'].loc[-1]         = 0
-    #df['b']                 = [0 if (a != -1) else 1 if (a == -1 and b > 0 and c > 0) else -1 for a,b,c in zip(df.p, df.dif, df.dea)]
-    #del df['dlt'], df['dif'], df['dea']
+    df['dif']               = (df.sema - df.lema).round(decimals=3)       
+    df['dea']               = pd.DataFrame.ewm(df.dif,span=macdMidd).mean().round(decimals=3)
+    df['macd']              = (2*df.dif - df.dea).round(decimals=2)
+    del df['sema'], df['lema']
+    del df['macd']
+    df['dlt']               = df.dif.shift(-1)
+    df['cross']             = [1 if (a<c and b>=c) else -1 if (a>=c and b<c) else 0 for a,b,c in zip(df.dif, df.dlt, df.dea)]
+    #df['cross']             = df.cross.shift(1)
+    #df['cross'].fillna(0, inplace=True)
+    del df['dlt']
 def procSeal  (df, gap) :
     df['seal']              = [1 if a >= 9.7 else 0 for a in df.grow]
     df['fstS']              = df['seal'].rolling(gap).sum()

@@ -405,6 +405,7 @@ def sendMail(endDate, befDate):
         mail_host               = "smtp.163.com"
         mail_user               = "kkndsims@163.com"
         mail_pass               = "IIYCKAQYPWXFHYUD"
+        mail_pass               = "MAEUSTLPXPJZJOTF"    # pop3/SMTP/IMAP 授信
         sender                  = 'kkndsims@163.com'
         receivers               = ['xieweisims@163.com']
         message                 = MIMEMultipart()
