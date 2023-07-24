@@ -12,8 +12,10 @@ import sys
 import pandas as pd
 import numpy  as np
 import warnings
-from scipy import signal
+import datetime
 warnings.filterwarnings( "ignore" )
+
+from interval3 import Interval
 
 maList                  = [5, 20, 60, 144] 
 amList                  = [5, 10]    
@@ -37,8 +39,6 @@ empty                   = pd.DataFrame()
 ######################################################################
 def getStockBuy(code, name, baseInfo, testFlag, mfile, dfile, wfile, info):
     global maxch
-    mothEnab            = 0
-    weekEnab            = 0
     daysEnab            = 1
     findEnab            = 1
     maxch               = len(name) if len(name) > maxch else maxch
@@ -52,35 +52,17 @@ def getStockBuy(code, name, baseInfo, testFlag, mfile, dfile, wfile, info):
         # 保留最近有涨停，或者成交活跃的个股
         if not washTodayData(days, 20, testFlag): return False, code, name
         
-        if findEnab :                   # 连板 + 反包
+        if findEnab and 0:                   # 连板 + 反包
             result      = findSealing(code[2:], name, testFlag, days, info, 9)
             if result : return result
         if findEnab and 0:                   # 盘整结束破前高
             result      = findDaysContinue(code[2:], name, testFlag, days, 120, 20, 8)
             if result : return result
-        if findEnab and 0:
-            result      = findDaysBot(code[2:], name, testFlag, days, 120, 20)
-            if result : return result  
-        if findEnab and 0:
-            result      = findDaysTop(code[2:], name, testFlag, days, 120, 20)
+        if findEnab and 1:
+            result      = findZSGrow(code[2:], name, testFlag, days, 20)
             if result : return result
         if findEnab and 1:
-            result      = findVolBuy(code[2:], name, testFlag, days, 120, 20)
-            if result : return result 
-           
-    if mothEnab or weekEnab :
-        #去除成交不足或不够活跃的个股
-        if not washLongData(days, 20, testFlag): return False, code, name
-        #周线：4个月内周线破1年历史放量，盘整破成本线
-        if weekEnab :
-            week        = getMergData("week", days)
-            result      = getLongMaxVolPoint(code[2:], name, testFlag, week,  50, 16, 1.3, '8.9 W.V_')
-            if result : return result
-        #月线：2年内有月线破5年历史量，盘整破成本线
-        if mothEnab :
-            month       = getMergData("month", days)
-            result      = getLongMaxVolPoint(code[2:], name, testFlag, month, 60, 20, 1.3, '7.9 M.V_')
-            #result      = findMonthTurtle(code[2:], name, testFlag, data, week, days, 20, mothQos)
+            result      = findWeekBuy(code[2:], name, testFlag, days, 20, 4, 2)
             if result : return result
     return False, code, name
     sys.exit(0)
@@ -101,17 +83,6 @@ def washTodayData(df, period, testFlag) :
     isb                     = np.sum(lgyx[-gap:])
     flag                    = 1 if istur or (isa + isseal + isb) else 0
     if testFlag : print("istur(%d) seal(%d) isa(%d)" %(istur, isseal, isa))
-    return flag
-def washLongData(df, period, testFlag) :
-    procTurtleData(df, period)
-    df['seal']              = [1 if a >= 9.5 else 0 for a in df.grow]
-    istur                   = 1 if df.tur.iloc[-1] == 1 else 0
-    isseal                  = 1 if df.seal.tail(int(period//2)).sum() >= 1 else 0
-    isa                     = 1 if df.amount.iloc[-1] >= 2 and df.change.iloc[-1] >= 15 else 0
-    isb                     = 1 if df.amount.iloc[-1] >= 3 and df.change.iloc[-1] >=  5 else 0
-    isc                     = 1 if df.amount.iloc[-1] >= 8 and df.change.iloc[-1] >=  2 else 0
-    flag                    = 1 if istur and ((isa + isb + isc) or isseal) else 0
-    if testFlag : print("tur(%d) seal(%d) isa(%d) isb(%d) isc(%d)" %(istur, isseal, isa, isb, isc))
     return flag
 ############################# 合并月/周线数据 ######################## 
 def getMergData(otype, data) :
@@ -171,7 +142,6 @@ def findDaysContinue(code, name, testFlag, df, period, delta, qos):
     close                   = df['close'].tolist()
     change                  = df.change.iloc[-1]
     amount                  = df.amount.iloc[-1]
-    tur                     = df.tur.iloc[-1]
     vec                     = close[point]
     cnt                     = 0
     info                    = ""
@@ -215,199 +185,169 @@ def findDaysContinue(code, name, testFlag, df, period, delta, qos):
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", vec, grow, gaps, info]
         return result
     return []
-############################# 日线调整 ##########################
-def findDaysBot(code, name, testFlag, df, period, delta):
-    funcEntry               = False
-    procMacdData(df)            # 获取dif，dea 
-    
-    vlist                   = df.v.where(df.v != 0).dropna().tolist()
-    vidx                    = df.v.where(df.v != 0).dropna().index
-    if not vlist : return []
-    point                   = vidx[-1] if len(vidx) else 0
-    gaps                    = len(df) - point - 1
-    dif                     = df['dif'].tolist()
-    dea                     = df['dea'].tolist()
-    close                   = df['close'].tolist()
-    change                  = df.change.iloc[-1]
-    amount                  = df.amount.iloc[-1]
-    info                    = ""
-    # 有低点
-    if dif[-1] <= 0 : return []
-    if dif[-1] <= dea[-1] : return []
-    if vlist[-1] == -1 :
-        if dif[point] >= dea[point] and dea[point] >= 0:
-            info            = "9.8 High " + str(change).rjust(5) + "%"
-        if dif[point] < dea[point] and dif[point] >= -0.2:
-            info            = "9.7 Low "  + str(change).rjust(5) + "%"
-        if testFlag:
-            print(code, name, len(df), "bot:", point, gaps, info)
-        
-    if info == "" : return []              
-    minval                  = df['close'].tail(90).min()
-    grow                    = round(close[-1] / minval, 2)
-    if True\
-    and grow < 2 \
-    and ((change >= 5 and amount >= 3) or (change >= 2 and amount >= 5)) \
-    and True :
-        sclose              = strClose(close[-1])
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
-        return result
-    return []
-############################# 日线调整 ##########################
-def findDaysTop(code, name, testFlag, df, period, delta):
-    funcEntry               = False
-    procMacdData(df)            # 获取dif，dea
-    
-    peaks                   = signal.find_peaks(df.close, distance=10)[0]
-    if len(peaks) == 0 : return []
-    point                   = peaks[-1]
-    gaps                    = len(df) - point - 1
-    if gaps > 5 : return []
-    dif                     = df['dif'].tolist()
-    dea                     = df['dea'].tolist()
-    close                   = df['close'].tolist()
-    change                  = df.change.iloc[-1]
-    amount                  = df.amount.iloc[-1]
-    info                    = ""
-    # 有低点
-    if dif[-1] <= 0 : return []
-    if dif[-1] <= dea[-1] : return []
-    if True :
-        if dif[point] >= dea[point] and dea[point] >= 0:
-            info            = "9.6 unkown " + str(change).rjust(5) + "%"
-        if dif[point] < dea[point] and dif[point] >= -0.2:
-            info            = "9.5 unkown "  + str(change).rjust(5) + "%"
-        if testFlag:
-            print(code, name, len(df), "bot:", point, gaps, info)
-        
-    if info == "" : return []              
-    minval                  = df['close'].tail(90).min()
-    grow                    = round(close[-1] / minval, 2)
-    if True\
-    and grow < 2 \
-    and df.tur.iloc[-1] \
-    and ((change >= 5 and amount >= 3) or (change >= 2 and amount >= 5)) \
-    and True :
-        sclose              = strClose(close[-1])
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
-        return result
-    return []
-############################# 日线调整 ##########################
-def findVolBuy(code, name, testFlag, df, period, delta):
-    funcEntry               = False
-    gap                     = 5
-    procMacdData(df)
-
+##################################################################################################
+################################################## 日线中枢 #######################################
+##################################################################################################
+def findColumeVertex(code, name, testFlag, df, windons):
+    halfWin                 = (windons -1) // 2
+    # find close top : must have continue heavy volumn and large grow amplitude
+    df['cmax']              = df.close.rolling(windons, center=True).max()
     for ma in voList:
         df['vol'+str(ma)]   = df.volume.rolling(ma).mean().round(decimals=2)
-        
-    df['shtv']              = df.volume.shift(1)
-    df['sht5']              = df.vol5.shift(1)
-    df['sht10']             = df.vol10.shift(1)
-    # continue 2days vol >= ma5/ma10
-    df['fire']              = [1 if a>=max(b,c) and d>=max(e,f) else 0 \
-                              for a,b,c,d,e,f in zip\
-                              (df.shtv, df.sht5, df.sht10, df.volume, df.vol5, df.vol10)]
-    # price grow together
-    df['cmin']              = df.close.rolling(gap).min()
-    df['cmax']              = df.close.rolling(gap).max()
-    df['cgrow']             = [(b/c) if a else 0 \
-                              for a,b,c in zip(df.fire, df.cmax, df.cmin)]
-    df['vbuy']              = [1 if a >= 1.07 else 0 \
-                              for a in df.cgrow]
-    # keep first vol fireup
-    df['csum']              = df.vbuy.rolling(gap).sum()
-    df['vbuy']              = [1 if a==1 and b==1 else 0\
-                              for a,b in zip(df.vbuy, df.csum)]
-    del df['shtv'], df['sht5'], df['sht10']
-    del df['cmin'], df['cmax'], df['cgrow']
-    #del df['fire'], df['csum']
+    df['bigv']              = [1 if a>=max(b,c) else 0 for a,b,c in zip(df.column, df.vol5, df.vol10)]
+    df['bcnt']              = df.bigv.rolling(halfWin).sum()
+    df['gcnt']              = df.grow.rolling(halfWin).max()
+    df['gsum']              = df.grow.rolling(halfWin).sum()
+    df['ctop']              = [1 if a == b and c >= 3 and (d >= 5 or e >= 5) else 0 \
+                              for a,b,c,d,e in zip(df.close, df.cmax, df.bcnt, df.gcnt, df.gsum)]
+    df['vbuy']              = [1 if c >= 3 and (d >= 5 or e >= 5) else 0 \
+                              for c,d,e in zip(df.bcnt, df.gcnt, df.gsum)]
     for ma in voList:
         del df['vol'+str(ma)]
+    del df['bcnt'], df['gcnt'], df['gsum']
     
-    info                    = ""
-    blist                   = df.where(df.vbuy == 1).dropna().index
-    if len(blist) == 0: return []
-    bpoint                  = int(blist[-1])
-    gaps                    = len(df) - bpoint - 1
+    # find close botton without close to top nearby
+    df['cmin']              = df.close.rolling(windons, center=True).min()
+    df['topsum']            = df.bigv.rolling(halfWin).sum()
+    df['cbot']              = [-1 if a == b and c == 0 else 0 \
+                              for a,b,c in zip(df.close, df.cmin, df.topsum)]
+    df['v']                 = df.ctop + df.cbot
+    del df['ctop'], df['cbot']. df['cmin'], df['cmax'], df['topsum']
+    del df['bigv'], df['vbuy']
+def findOverlap(inter, i, high, low):
+    rust                    = inter[i].overlaps(inter[i-1]) and inter[i].overlaps(inter[i-2])
+    if rust:
+        overUp              = min(high[i], high[i-1], high[i-2])
+        overDw              = max( low[i],  low[i-1],  low[i-2])
+        over1               = Interval(overDw, overUp)
+        overMax             = max(high[i], high[i-1], high[i-2])
+        overMin             = min( low[i],  low[i-1],  low[i-2])
+        over2               = Interval(overMin, overMax)
+        return [True, i, overMin, overDw, overUp, overMax, over1, over2]
+    return [False, i, 0, 0, 0, 0]
+def findZSGrow(code, name, testFlag, df, period):
+    funcEntry               = False
+    # S0: when top happen, volume increase or hold close increase(5min <= 2days half <= 5days overlap)
+    # S1: when top happen, volume decrease without close decrease(have no  bot, then breakout trend, min(dif)>=dea>0; days < 2week)
+    # S2: when top happen, volume decrease with    close decrease(have one bot, then breakout trend, min(dif)<=dea>0; days < 1month) 
+    # S3: when top happen, volume decrease with    close decrease(have >=2 bot, then breakout trend, min(dif)<=dea>0; days < 3month)  
+
+    # S0: no overlap after the vertex, 5min zhongshu
+    # S1: 3 or 5 days  overlap, half zhongshu
+    # S2: 3 or 5 week  overlap, days zhongshu
+    # S3: 3 or 5 month overlap, week zhongshu
+    
+    # S0: 2 or 5 days overlap, when top happen, volume increase or hold clos      
+    vlist                   = df.where(df.v != 0).dropna().index
+    if len(vlist) == 0: return []
     close                   = df.close.tolist()
-    if testFlag:
-        print(code, name, blist, len(df), bpoint, gaps, close[bpoint], close[-1])
+    high                    = df.high.tolist()
+    low                     = df.low.tolist()
+    point                   = int(vlist[-1])
+    lens                    = len(df) - 1
+    gaps                    = lens - point
+    info                    = ""
     
-    # check between last 2 vbuys
-    if gaps <= 4 and len(blist) >= 2:
-        b2p                 = int(blist[-2])
-        cmax                = max(close[b2p:bpoint])
-        difmin              = df.dif[b2p:bpoint].min()
-        if close[-1] >= cmax and difmin >= 0:
-            info            = "8.9 Vol S "
-            
-    if gaps > 4:
-        vlist               = df.iloc[bpoint:].where(df.v == 1).dropna().index
-        vnum                = len(vlist)
-        seal                = df.seal.iloc[bpoint:].sum()
-        if vnum == 0 :
-            cmin            = min(close[bpoint:])
-            if cmin >= close[bpoint] and close[-1] == max(close[bpoint:]) and seal :
-                info        = "8.8 Vol A "
-        
-        if vnum == 1:
-            vpoint          = int(vlist[0])
-            if close[-1] >= close[vpoint] and close[-1] >= close[bpoint] and seal :
-                info        = "8.7 Vol B "
+    inter                   = [Interval(a,b) for a,b in zip(df.low, df.high)]
+    lastIn                  = 0
+    overlapLst              = []
+    overlapFlag             = False
+    for i in range(point+2, len(df)):
+        if len(overlapLst) == 0:
+            overlapFlag     = True
+        else:
+            if not inter[i].overlaps(overlapLst[-1][-1]):
+                if i - lastIn >= 3 : overlapFlag = True
+            else:
+                lastIn      = i
+        if overlapFlag:
+            rust            = findOverlap(inter, i, high, low)
+            if rust[0]:
+                overlapLst.append(rust)
+                overlapFlag = False
+                
+    if len(overlapLst):
+        gaps                = lens - overlapLst[-1][1]
+        rust2               = inter[-2].overlaps(overlapLst[-1][-1])
+        rust1               = inter[-1].overlaps(overlapLst[-1][-1])
+        if rust2 and not rust1:
+            if low[-1] > overlapLst[-1][5]:
+                info        = "9.7 Days : out"
+    
     if info == "" : return []
-    
     minval                  = df['close'].tail(90).min()
     grow                    = round(close[-1] / minval, 2)
     change                  = df.change.iloc[-1]
     amount                  = df.amount.iloc[-1]
+    
+    procMacdData(df)
+    if (df.dea[point] < 0) : return []
+    
     if True \
+    and ((amount >= 2 and change >= 5) or amount >= 6) \
     and grow < 1.5 \
-    and ((amount >= 2 and change >= 10) or (amount >= 3 and change >=5) or amount >= 6) \
-    and True :
+    and True:
+    #and ((mavrg >= 3 and cavrg >= 5) or (mavrg >= 8 and cavrg >= 2)) \
+    #and True :
+        sclose              = strClose(close[-1])
+        info               += str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
+        #sys.exit(0)
+        return result
+    return []
+############################# 日线调整 ##########################
+def findWeekBuy(code, name, testFlag, df, period, delt, hold):
+    funcEntry               = False
+    if df.tur.tail(5).count() == 0: return [False, code, name]
+    week                    = getMergData("week", df)
+    close                   = week.close.tolist()
+    high                    = week.high.tolist()
+    low                     = week.low.tolist()
+    inter                   = [Interval(a,b) for a,b in zip(week.low, week.high)]
+    lens                    = len(week) - 1
+    overlapLst              = []
+    info                    = ""
+    for i in range(lens, 0, -1):
+        rust                = findOverlap(inter, i, high, low)
+        if rust[0]:
+            overlapLst.append(rust)
+            break
+    if len(overlapLst):
+        gaps                = lens - overlapLst[-1][1]
+        rust2               = inter[-2].overlaps(overlapLst[-1][-1])
+        rust1               = inter[-1].overlaps(overlapLst[-1][-1])
+        if rust2 and not rust1 and close[-1] >= overlapLst[-1][5]:
+            info            = "8.9 Week : out "
+        if rust1 and close[-1] >= overlapLst[-1][5]:
+            info            = "8.8 Week : inn "
+        
+    weekday                 = datetime.datetime.now().weekday() + 1
+    hour                    = datetime.datetime.now().hour
+    weekday                 = weekday if hour >= 16 and hour <= 24 else weekday - 1 
+    chlvl0                  = 10 if weekday > 1 else 20
+    chlvl1                  = 5
+    amlvl0                  = 3
+    amlvl1                  = 6
+    #print(weekday, hour)
+    
+    if info == "" : return []
+    minval                  = week['close'].tail(30).min()
+    grow                    = round(close[-1] / minval, 2)
+    change                  = week.change.iloc[-1]
+    amount                  = week.amount.iloc[-1]
+    if True \
+    and grow < 1.5  \
+    and (change >= chlvl0 * weekday \
+         or (change >= chlvl1 * weekday and amount >= amlvl0 * weekday) \
+         or (amount >= amlvl1 * weekday)) \
+    and True:
         sclose              = strClose(close[-1])
         info               += str(change).rjust(5) + "%"
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
         return result
-        print(df.tail(20))
+        print(week.tail(20))
         sys.exit(0)
     return []
-############################# 寻找最近的最大换手率， 且日线大于最大换手率的成本 ##########################
-def getLongMaxVolPoint(code, name, testFlag, df, period, delta, grgap, qos):
-    funcEntry               = False
-    # 找出最近period的最大成交量，并剔除峰值不在delta内，或者峰值出现不到3根(调整未结束)
-    idx                     = df['volume'].tail(period).idxmax()
-    gaps                    = len(df) - idx
-    if not (gaps < delta and gaps > 3) : return []
-    
-    # TO DO ：在低点处放量，不是在中间或高点放量
-    mcls                    = df['close'].iloc[idx-2:idx+3].max()
-    mins                    = df['close'].iloc[idx-2:idx+3].min()
-    sumch                   = df['change'].iloc[idx-2:idx+3].sum()
-    cost                    = 0
-    for i in range(idx-2, idx+3):
-        avrg                = (df['close'].iloc[i] + df['high'].iloc[i] + df['low'].iloc[i]) / 3
-        cost                += avrg * (df['change'].iloc[i] / sumch)
-        if testFlag: print(i, df['close'].iloc[i], df['change'].iloc[i], sumch, avrg, cost)
-    
-    cost                    = round(cost, 2)
-    mlst                    = df['close'].iloc[-1]
-    grow                    = round(mlst / cost, 2)
-    grow1                   = round(mlst / mins, 2)
-    if testFlag:
-        print(code, name, idx, gaps, delta, mcls, mlst, cost, grow, grgap)
-    if  grow >= 1.05 and grow < grgap and grow1 < 1.8 \
-    and df['close'].iloc[-2]  < cost \
-    and True :
-
-        sclose              = strClose(mcls)
-        change              = df.change.iloc[-1]
-        amount              = df.amount.iloc[-1]
-        info                = str(qos) + str(change).rjust(5) + "%" + "_" + str(cost)
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", mlst, grow, gaps, info]
-        return result
-    return []
-
 
 ######################################################################
 ############################# 基础板块函数 ############################
@@ -463,6 +403,7 @@ def findPlateBuy(code, name, testFlag, days):
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[point], grow, gaps, info]
         return result
     return False, code, name    
+
 
 ######################################################################
 ############################# 基础处理函数 ############################
@@ -562,7 +503,7 @@ def procVector(df, gap) :
 ############################# 月线海龟 or 月线最低点换手 ###########################
 #月线上出现低点附近放巨量，且周线海龟，看日线的买点
 def findMonthTurtle(code, name, testFlag, data, week, days, period, num):
-    funcEntry               = False
+    #funcEntry               = False
     # 找出历史高点
     lens                    = len(data)
     close                   = data.close.tolist()
@@ -595,7 +536,7 @@ def findMonthTurtle(code, name, testFlag, data, week, days, period, num):
 ############################# 周线海龟 or 周线最低点换手 ##########################
 #周线从最高点下来的最低点附近，出现放量，经过调整后，周线突破上次放量的股价，看日线的买点
 def findWeekTurtle(code, name, testFlag, week, days, period, num):
-    funcEntry               = False
+    #funcEntry               = False
     # 找出历史高点
     lens                    = len(week)
     close                   = week.close.tolist()
@@ -645,7 +586,7 @@ def getLastFireUp(df, gap, grow) :
         return [fp, fv, maxCls, minCls, minIdx]
     return []
 def findDaysTurtle(code, name, testFlag, days, inn, period, num):
-    funcEntry               = False
+    #funcEntry               = False
     lens                    = len(days)
     close                   = days.close.tolist()
     #print(days.tail(20))
@@ -661,7 +602,6 @@ def findDaysTurtle(code, name, testFlag, days, inn, period, num):
     fp                      = result[0]    
     fv                      = result[1]
     top                     = result[2]
-    bot                     = result[3]
     gap0                    = lens - fp
     gap1                    = lens - result[4]
     dlt                     = round(close[-1] / max(fv, top), 2)
@@ -689,7 +629,7 @@ def findDaysTurtle(code, name, testFlag, days, inn, period, num):
     return False, code, name
 ############################# 上涨中继 ###################################
 def findIncrease(code, name, testFlag, days, inn, num):
-    funcEntry               = False
+    #funcEntry               = False
     close                   = days['close'].tolist()
     sclose                  = strClose(close[-1])
     amount                  = days['amount'].iloc[-1]
@@ -745,7 +685,7 @@ def findIncrease(code, name, testFlag, days, inn, num):
     return False, code, name
 ############################# 点火放量大涨 ###################################
 def findFireup(code, name, testFlag, days, inn, num):
-    funcEntry               = False
+    #funcEntry               = False
     # 找出最近一次首板涨停
     slist                   = days.where(days.fstS == 1).dropna().index
     if len(slist) == 0:
@@ -781,7 +721,7 @@ def findFireup(code, name, testFlag, days, inn, num):
     return False, code, name
 ############################# 寻找最近的最大换手率， 且日线大于最大换手率的成本 ##########################
 def findDaysJump(code, name, testFlag, df, delta, qos):
-    funcEntry               = False
+    #funcEntry               = False
     vlist                   = df.where(df.jump == 1).dropna().index
     point                   = vlist[-1] if len(vlist) else 0
     gaps                    = len(df) - point

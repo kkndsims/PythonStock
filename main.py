@@ -11,8 +11,6 @@ if __name__ == '__main__' :
     befDate             = getLastWorkDay(datetime.datetime.now(), endDate)
     #befDate             = '20230530'
     #endDate             = '20230531'
-
-    #print(55-39)
     #sys.exit(0)
     
     getStockCode(endDate)       #获取股票中文名称
@@ -24,8 +22,8 @@ if __name__ == '__main__' :
     procInitStockData(endDate)  #处理days/week/month数据
     
     testList            = []
-    #testList            = ['SH600706']  #上证
-    #testList            = ['SZ001338']  #深证
+    #testList            = ['SH600072']  #上证
+    #testList            = ['SZ301255']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         

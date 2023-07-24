@@ -78,7 +78,8 @@ def getLastWorkDay(now, endDate):
 ############################# 获取股票code/name ######################
 def getStockCode(endDate) : 
     global codeList, codeName, baseInfo, baseFile
-    baseFile            = basepath + "\\沪深Ａ股" + endDate + ".xls"    
+    baseFile            = basepath + "\\沪深Ａ股" + endDate + ".xls"
+    baseFile            = basepath + "\\全部Ａ股" + endDate + ".xls"
     if not os.path.exists(baseFile) :
         print("%s :: line %3d : ############### %s socketFile not exists"\
         %("comDef", sys._getframe().f_lineno, baseFile))
