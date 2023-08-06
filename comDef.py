@@ -113,41 +113,6 @@ def getPlateCode(endDate) :
         %("comDef", sys._getframe().f_lineno, len(plateInfo)))
     plateList           = [ "SH"+a.replace("\"", "").replace("=", "") for a in plateList]
 ############################# 股票复盘 ###############################
-def getDaysReplay(endDate):
-    global rsltpath, baseFile
-    df                  = pd.read_csv(baseFile, sep='\t', encoding='gbk')
-    print("\n%s :: line %3d : ############### replay with stockNum = %d"\
-    %("plateApi", sys._getframe().f_lineno, len(df)))
-        
-    df.drop(df.tail(1).index, inplace=True)             # drop last rows
-    df['amount']        = round(df['总金额'] / 10000, 2)
-    summ                = df['amount'].sum()
-    midd                = df['amount'].median()
-    avrg                = df['amount'].mean()
-    print("成交总额(%.1f)亿, 中位数(%.1f)亿, 平均数(%.1f)亿" %(summ, midd, avrg))
-    
-    df['grow']          = [0 if a == '--  ' else float(a) for a in df['涨幅%']]
-    upnum               = len(df[df['grow'] >  0.0])
-    dwnum               = len(df[df['grow'] <  0.0])
-    flnum               = len(df[df['grow'] == 0.0])
-    midd1               = df['grow'].median()
-    avrg1               = df['grow'].mean()
-    grow10              = len(df[df['grow'] >= 9.7])
-    grow05              = len(df[df['grow'] >=   5])
-    down10              = len(df[df['grow'] <=-9.7])
-    down05              = len(df[df['grow'] <=  -5])
-    print("上涨个数(%4d), 下跌个数(%4d), 平盘个数(%4d), 涨幅中位数(%.1f), 平均数(%.1f)" %(upnum, dwnum, flnum, midd1, avrg1))
-    print("涨停个数(%4d), >=5个数(%4d)" %(grow10, grow05))
-    print("跌停个数(%4d), <=5个数(%4d)" %(down10, down05))
-    
-    df['change']        = [0 if a == '--  ' else float(a) for a in df['换手%']]
-    dt                  = df[['代码', '名称', 'amount', 'change', 'grow']]
-    ch                  = dt[dt['amount'] >= 10]
-    ch                  = ch[ch['change'] >= 10]
-    ch                  = ch[ch['grow']   >=  0]
-    ch                  = ch.sort_values('amount', ascending=False)
-    print("成交(10亿)换手( 5%%)个数(%4d)" %(len(ch)) )
-    print(ch)
 def getPlatReplay(endDate, testFlag, testList):
     global rsltpath, plateList, plateName
     if not testFlag:
@@ -354,6 +319,9 @@ def getStockImage(endDate, testFlag, testCode):
         if True:
             print("%s :: line %3d : ############### process with testFlag = %d codeNum = %d"\
             %("comDef", sys._getframe().f_lineno, testFlag, len(clist)))
+                
+            # 日线复盘
+            getDaysReplay(endDate, baseFile)
             for i in range(len(clist)):
                 code            = clist[i]
                 name            = nlist[i]
@@ -376,7 +344,7 @@ def getStockImage(endDate, testFlag, testCode):
                 mfile           = mothpath + code
                 dfile           = dayspath + code
                 wfile           = weekpath + code
-                flag            = getStockBuy(code, name, baseInfo, testFlag, mfile, dfile, wfile, value)
+                flag            = getStockBuy(code, name, endDate, baseInfo, testFlag, mfile, dfile, wfile, value)
                 #print(i, endDate, code, name, flag)
                 if flag[0] == True:
                     process_list.append(flag)

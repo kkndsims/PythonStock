@@ -34,10 +34,16 @@ mothQos                 = weekQos - 1
 maxch                   = 0
 empty                   = pd.DataFrame()
 
+percnet                 = 15
+mlevel                  = 0
+clevel                  = 0
+glevel                  = 0
+times                   = 2
+
 ######################################################################
 ############################# 各种算法处理买点 ########################
 ######################################################################
-def getStockBuy(code, name, baseInfo, testFlag, mfile, dfile, wfile, info):
+def getStockBuy(code, name, endDate, baseInfo, testFlag, mfile, dfile, wfile, info):
     global maxch
     daysEnab            = 1
     findEnab            = 1
@@ -226,6 +232,7 @@ def findOverlap(inter, i, high, low):
         return [True, i, overMin, overDw, overUp, overMax, over1, over2]
     return [False, i, 0, 0, 0, 0]
 def findZSGrow(code, name, testFlag, df, period):
+    global mlevel, clevel, glevel
     funcEntry               = False
     # S0: when top happen, volume increase or hold close increase(5min <= 2days half <= 5days overlap)
     # S1: when top happen, volume decrease without close decrease(have no  bot, then breakout trend, min(dif)>=dea>0; days < 2week)
@@ -271,8 +278,8 @@ def findZSGrow(code, name, testFlag, df, period):
         rust2               = inter[-2].overlaps(overlapLst[-1][-1])
         rust1               = inter[-1].overlaps(overlapLst[-1][-1])
         if rust2 and not rust1:
-            if low[-1] > overlapLst[-1][5]:
-                info        = "9.7 Days : out"
+            if low[-1] > overlapLst[-1][5] and df.grow.iloc[-1] >= min(glevel*2, 5):
+                info        = "9.7 Days : out "
     
     if info == "" : return []
     minval                  = df['close'].tail(90).min()
@@ -284,19 +291,18 @@ def findZSGrow(code, name, testFlag, df, period):
     if (df.dea[point] < 0) : return []
     
     if True \
-    and ((amount >= 2 and change >= 5) or amount >= 6) \
+    and ((amount >= mlevel and change >= clevel) or (amount >= mlevel*3 and change >= 2)) \
     and grow < 1.5 \
     and True:
-    #and ((mavrg >= 3 and cavrg >= 5) or (mavrg >= 8 and cavrg >= 2)) \
-    #and True :
         sclose              = strClose(close[-1])
         info               += str(change).rjust(5) + "%"
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", minval, grow, gaps, info]
         #sys.exit(0)
         return result
     return []
-############################# 日线调整 ##########################
+############################# 周线中枢 ##########################
 def findWeekBuy(code, name, testFlag, df, period, delt, hold):
+    global mlevel, clevel, glevel, times
     funcEntry               = False
     if df.tur.tail(5).count() == 0: return [False, code, name]
     week                    = getMergData("week", df)
@@ -316,18 +322,16 @@ def findWeekBuy(code, name, testFlag, df, period, delt, hold):
         gaps                = lens - overlapLst[-1][1]
         rust2               = inter[-2].overlaps(overlapLst[-1][-1])
         rust1               = inter[-1].overlaps(overlapLst[-1][-1])
-        if rust2 and not rust1 and close[-1] >= overlapLst[-1][5]:
+        if rust2 and not rust1 and close[-1] >= overlapLst[-1][5] and df.grow.iloc[-1] >= min(glevel*times, 5):
             info            = "8.9 Week : out "
-        if rust1 and close[-1] >= overlapLst[-1][5]:
+        if rust1 and close[-1] >= overlapLst[-1][5] and df.grow.iloc[-1] >= min(glevel*times, 5):
             info            = "8.8 Week : inn "
         
     weekday                 = datetime.datetime.now().weekday() + 1
     hour                    = datetime.datetime.now().hour
     weekday                 = weekday if hour >= 16 and hour <= 24 else weekday - 1 
-    chlvl0                  = 10 if weekday > 1 else 20
-    chlvl1                  = 5
-    amlvl0                  = 3
-    amlvl1                  = 6
+    chlvl1                  = clevel * times if weekday == 1 else clevel * weekday
+    amlvl1                  = mlevel * times if weekday == 1 else mlevel * weekday
     #print(weekday, hour)
     
     if info == "" : return []
@@ -337,9 +341,7 @@ def findWeekBuy(code, name, testFlag, df, period, delt, hold):
     amount                  = week.amount.iloc[-1]
     if True \
     and grow < 1.5  \
-    and (change >= chlvl0 * weekday \
-         or (change >= chlvl1 * weekday and amount >= amlvl0 * weekday) \
-         or (amount >= amlvl1 * weekday)) \
+    and (change >= chlvl1*2 or amount >= amlvl1*2 or (change >= chlvl1 and amount >= amlvl1)) \
     and True:
         sclose              = strClose(close[-1])
         info               += str(change).rjust(5) + "%"
@@ -492,6 +494,24 @@ def procVector(df, gap) :
     #df['v'].loc[-1]         = 0
     #del df['v1']
     #sys.exit(0)
+def getDaysReplay(endDate, baseFile):
+    global percnet, mlevel, clevel, glevel
+    df                  = pd.read_csv(baseFile, sep='\t', encoding='gbk')
+    df.drop(df.tail(1).index, inplace=True)             # drop last rows
+    df['amount']        = round(df['总金额'] / 10000, 2)
+    df['change']        = [0 if a == '--  ' else float(a) for a in df['换手%']]
+    df['grow']          = [0 if a == '--  ' else float(a) for a in df['涨幅%']]
+    summ                = df['amount'].sum()
+    mlevel              = np.percentile(df.amount, 100 - percnet)
+    clevel              = np.percentile(df.change, 100 - percnet)
+    glevel              = np.percentile(df.grow,   100 - percnet)
+    print("成交总额(%.1f)亿, Top%d%% 成交量(%.1f)亿, 换手率（%.1f%%）,涨幅(%.1f%%)" %(summ, percnet, mlevel, clevel, glevel))
+    grow10              = len(df[df['grow'] >= 9.7])
+    grow05              = len(df[df['grow'] >=   5])
+    down10              = len(df[df['grow'] <=-9.7])
+    down05              = len(df[df['grow'] <=  -5])
+    print("涨停个数(%3d), >=5个数(%3d)" %(grow10, grow05))
+    print("跌停个数(%3d), <=5个数(%3d)" %(down10, down05))
 #####################################################################
 ############################# 基础函数结束 ###########################
 #####################################################################

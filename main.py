@@ -30,7 +30,6 @@ if __name__ == '__main__' :
     testList            = []    
     #testList            = ['SH880350']
     #testFlag            = True if testList else False
-    #getDaysReplay(endDate)
     #getPlatReplay(endDate, testFlag, testList)
       
     sendFlag            = True
