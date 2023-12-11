@@ -9,21 +9,20 @@ from   comDef      import *
 if __name__ == '__main__' :
     endDate             = getWorkDay(datetime.datetime.now())
     befDate             = getLastWorkDay(datetime.datetime.now(), endDate)
-    #befDate             = '20230530'
-    #endDate             = '20230531'
+    #befDate             = '20231201'
+    #endDate             = '20231130'
     #sys.exit(0)
     
     getStockCode(endDate)       #获取股票中文名称
     #getPlateCode(endDate)       #获取板块中文名称
     
+    setUpdateHalfEn (True)      #使能处理half数据
     setUpdateDaysEn (True)      #使能处理日线数据
-    #setUpdateWeekEn (True)      #使能处理周线数据
-    #setUpdateMothEn (True)      #使能处理月线数据
     procInitStockData(endDate)  #处理days/week/month数据
     
     testList            = []
-    #testList            = ['SH600072']  #上证
-    #testList            = ['SZ301255']  #深证
+    #testList            = ['SH002406']  #上证
+    #testList            = ['SZ002599']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         
