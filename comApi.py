@@ -61,7 +61,7 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
     #print(code, name, info['流通市值'].iloc[-1], value)
     #sys.exit(0)
     
-    if findEnab and 0:                   # 周线突破
+    if findEnab and 1:                   # 周线突破
         result      = findWeekGrow(code[2:], name, testFlag, days, half, "9W.")
         if result : return result
     
@@ -73,10 +73,7 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
         result      = findDaysGrow(code[2:], name, testFlag, days, half, start, 4, "7D.")
         if result : return result
 
-    if findEnab and 1:                   # half中继
-        result      = findHalfGrow(code[2:], name, testFlag, days, half, start, 4, "6H.")
-        if result : return result
-        
+    if findEnab and 0:                   # half中继
         result      = findBigsVolm(code[2:], name, testFlag, days, half, start, 8, "5B.")
         if result : return result
 
@@ -218,133 +215,148 @@ def findFireUp(code, name, testFlag, df, ktype):
     vidx                    = df.fireup.where(df.fireup == 1).dropna().index
     if len(vidx) == 0 : return 0
     return vidx[-1]
+def findDaysCross(code, name, testFlag, df, delta):
+    close                   = df.close.tolist()
+    uplist                  = df.cross.where(df.cross ==  1).dropna().index
+    dwlist                  = df.cross.where(df.cross == -1).dropna().index
+    upidx                   = uplist[-1] if len(uplist) else df.close.tail(delta).idxmin()
+    dwidx                   = dwlist[-1] if len(dwlist) else df.close.tail(delta).idxmax()
+    # grow then adjust : dif > dea
+    if dwidx < upidx :
+        if df.dif.iloc[-1] < 0 : return []
+        if df.dea.iloc[-1] < 0 : return []
+        difmax              = df.dif.iloc[upidx:].idxmax()
+        gaps                = df.index[-1] - difmax
+        if difmax == df.dif.index[-1]  : return [True, upidx, dwidx, gaps]
+        macdmax             = df.macd.iloc[upidx:].idxmax()
+        macdmin             = df.macd.iloc[macdmax:].idxmin()
+        gaps                = df.index[-1] - macdmin
+        if macdmin != df.macd.iloc[-1] : 
+            return [True, upidx, dwidx, gaps]
+        elif close[-1] > df.cls10.iloc[-1]: 
+            return [True, upidx, dwidx, gaps]
+    # grow then adjust : dif < dea     
+    elif upidx < dwidx :
+        difmin              = df.dif.iloc[dwidx:].min()
+        gaps                = df.index[-1] - df.dif.iloc[dwidx:].idxmin()
+        if df.dif.iloc[-1] == difmin : return []
+        if df.dif.iloc[-1] < df.dif.iloc[-2] : return []
+        if close[-1] < df.close.iloc[dwidx]  : return []
+        #if close[-1] < max(df.high.iloc[dwidx-2:dwidx]) : return []
+        return [True, upidx, dwidx, gaps]
+    return []
 ############################# 日线脱离中枢 #########################
 def findWeekGrow(code, name, testFlag, df, hf, qos):
     info                    = ""
-    if df.close.iloc[-1] < df.cls5. iloc[-1] : return ""
-    if df.close.iloc[-1] < df.cls10.iloc[-1] : return ""
-    
     week                    = getMergData("week", df)
-    procTurtleData(week, maList[-1])
-    if week.tur.iloc[-1] == 0 : return ""
-    
     procMacdData(week)
     close                   = week.close.tolist()
     amount                  = df.amount.iloc[-1]
     change                  = df.change.iloc[-1]
-    difmax                  = week.dif.tail(90).idxmax()
-    gaps                    = week.index[-1] - difmax
-    grow                    = round(week.close.iloc[-1] / week.close.tail(90).min(), 2)
-    topcls                  = week.close.iloc[-90 : difmax].max()
-    dw                      = week.cross.iloc[difmax:].where(week.cross == -1).dropna().index
-    if len(dw) == 0 :
-        if close[-1] >= topcls  :
-            if week.dif.iloc[-1] > week.dif.iloc[difmax:].min() :
-                info        = str(qos) + "8 " + str(change).rjust(5) + "%"
-    else:
-        fstdw               = dw[0]
-        cross               = [1 if a > b else 0 for a, b in zip(week.dif, week.dea)]
-        crosscnt            = sum(cross[fstdw:])
-        if close[-1] >= topcls \
-        and week.dif.iloc[fstdw:].idxmin() > week.macd.iloc[fstdw:].idxmin() \
-        and ((week.dif.iloc[-1] > week.dea.iloc[-1] >= 0) or (crosscnt)) \
-        and True :
-            info            = str(qos) + "7 " + str(change).rjust(5) + "%"
+    uplist                  = week.cross.where(week.cross ==  1).dropna().index
+    dwlist                  = week.cross.where(week.cross == -1).dropna().index
+    upidx                   = uplist[-1] if len(uplist) else week.close.tail(90).idxmin()
+    dwidx                   = dwlist[-1] if len(dwlist) else week.close.tail(90).idxmax()
+    botcls                  = close[upidx]
+    grow                    = round(close[-1] / botcls, 2)
+    # grow then adjust : dif > dea
+    if dwidx < upidx :
+        if week.dif.iloc[-1] < 0 : return ""
+        if week.dea.iloc[-1] < 0 : return ""
+        difmax              = week.dif.iloc[upidx:].idxmax()
+        if week.dif.index[-1] == difmax : return ""
+        macdmin             = week.macd.iloc[difmax:].min()
+        macdidx             = week.macd.iloc[difmax:].idxmin()
+        gaps                = week.index[-1] - macdidx
+        if week.macd.iloc[-1] == macdmin : return ""
+        if week.macd.iloc[-1] < week.macd.iloc[-2] : return ""
+        info                = str(qos) + "9 " + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), botcls, str(amount)+"亿", close[-1], grow, gaps, info]
+    # grow then adjust : dif < dea     
+    elif upidx < dwidx :
+        difmin              = week.dif.iloc[dwidx:].min()
+        minidx              = week.dif.iloc[dwidx:].idxmin()
+        gaps                = week.index[-1] - minidx
+        if week.dif.iloc[-1] == difmin : return ""
+        if week.dif.iloc[-1] < week.dif.iloc[-2] : return ""
+        if close[-1] != max(close[dwidx:]) : return ""
+        if grow >= 2 : return ""
+        info                = str(qos) + "8 " + str(change).rjust(5) + "%"
+        result              = [True, code, name.rjust(4), botcls, str(amount)+"亿", close[-1], grow, gaps, info]
     if info == "" : return ""
-    
     if True \
-    and ((amount >= 4 and change >= 4) or (amount >= 8 and change >= 2) or (df.seal.iloc[-1] and change >= 5)) \
-    and close[-1] < 50 \
-    and grow < 1.75 \
+    and ((amount >= 5 and change >= 4) or (amount >= 8 and change >= 2) or (df.seal.iloc[-1] and change >= 5)) \
     and True :
-        result              = [True, code, name.rjust(4), topcls, str(amount)+"亿", close[-1], grow, gaps, info]
         return result
     return ""
 def findDaysGrow(code, name, testFlag, df, hf, start, money, qos):
-    funcEntry               = False
     info                    = ""
     procMacdData(df)
-    if df.dif.iloc[-1] < 0 : return ""
+    dfRust                  = findDaysCross(code, name, testFlag, df, 120)
+    if len(dfRust) == 0 : return ""
+    if df.macd.iloc[-1] < 0 : return ""
     
-    grow                    = round(df.close.iloc[-1] / df.close.tail(90).min(), 2)
-    dw                      = df.cross.where(df.cross == -1).dropna().index
-    point                   = dw[-1] if len(dw) else 10
-    gaps                    = len(df) - point
-    volmax                  = df.change.iloc[point-10:point].idxmax()
-    clsmax                  = df.close.iloc[volmax-3:volmax+3].max()
     close                   = df.close.tolist()
-    change                  = df.change.tolist()
+    upidx                   = dfRust[1]
+    gaps                    = dfRust[-1]
+    botcls                  = close[upidx]
+    grow                    = round(close[-1] / botcls, 2)
     amount                  = df.amount.iloc[-1]
-    if not (close[-1] >= clsmax) : return ""
+    change                  = df.change.iloc[-1]
 
     procMacdData(hf)
-    difmax                  = hf.dif.tail(point*8).idxmax()
-    if hf.dif.iloc[-1] < 0 : return ""
-    if hf.dif.iloc[-1] < hf.dea.iloc[-1] : return ""
-    if hf.dif.iloc[-1] != hf.dif.iloc[difmax:].min() or df.seal.iloc[-1] :
-        info                = str(qos) + "9 " + str(change[-1]).rjust(5) + "%"
-    else:
-        info                = str(qos) + "8 " + str(change[-1]).rjust(5) + "%"
-    if info == "" : return ""
+    hfRust                  = findDaysCross(code, name, testFlag, hf, 120)
+    if len(hfRust) == 0 : return ""
+    
+    if grow > 1.5 : return ""
+    if not ((amount >= 5 and change >= 5) or (amount >= 8 and change >= 2) or (df.seal.iloc[-1] and change >= 5)) : return ""
 
-    if True \
-    and ((amount >= 4 and change[-1] >= 4) or (amount >= 8 and change[-1] >= 2) or (df.seal.iloc[-1] and change[-1] >= 5)) \
-    and close[-1] < 50 \
-    and df.dif.iloc[-1] >= df.dif.iloc[-2] \
-    and grow < 2 \
-    and True :
-        result              = [True, code, name.rjust(4), clsmax, str(amount)+"亿", close[-1], grow, gaps, info]
-        return result
-    return ""
+    info                    = str(qos) + "9 " + str(change).rjust(5) + "%"
+    result                  = [True, code, name.rjust(4), botcls, str(amount)+"亿", close[-1], grow, gaps, info]
+    return result
 def findHalfGrow(code, name, testFlag, df, hf, start, money, qos):
     info                    = ""
-    if df.close.iloc[-1] < df.cls5. iloc[-1] : return ""
-    if df.close.iloc[-1] < df.cls20.iloc[-1] : return ""
-    procMacdData(hf)
-    dw                      = hf.cross.where(hf.cross == -1).dropna().index
-    if hf.dif.iloc[-1] < 0 : return ""
-    if hf.dif.iloc[-1] == hf.dif.iloc[dw[-1]:].min() : return ""
+    procMacdData(df)
+    dfRust                  = findDaysCross(code, name, testFlag, df, 120)
+    if len(dfRust) == 0 : return ""
+    if df.macd.iloc[-1] < 0 : return ""
     
-    gaps                    = df.index[-1] - start
-    delta                   = (gaps + 1) * 8
-    #delta                   = delta if delta < 40 else 40
-    close                   = hf.close.tolist()
+    close                   = df.close.tolist()
+    upidx                   = dfRust[1]
+    gaps                    = dfRust[-1]
+    botcls                  = close[upidx]
+    grow                    = round(close[-1] / botcls, 2)
     amount                  = df.amount.iloc[-1]
     change                  = df.change.iloc[-1]
-    grow                    = round(df.close.iloc[-1] / df.close.tail(90).min(), 2)
-    
-    difmax                  = hf.dif.tail(delta).idxmax()
-    if hf.dif.iloc[-1] == hf.dif.iloc[difmax:].min() : return ""
 
-    volmax                  = hf.volume.tail(delta).idxmax()
-    topcls                  = hf.close.iloc[volmax-3 : volmax+3].max()
-    if close[-1] > topcls \
-    and gaps >= 2 \
-    and True :
-        info                = str(qos) + "9 " + str(change).rjust(5) + "%"
-    if info == "" : return ""
+    procMacdData(hf)
+    hfRust                  = findDaysCross(code, name, testFlag, hf, 120)
+    if len(hfRust) == 0 : return ""
     
-    if True \
-    and ((amount >= 5 and change >= 5) or (amount >= 8 and change >= 2) or (df.seal.iloc[-1] and change >= 5)) \
-    and close[-1] < 50 \
-    and grow < 1.5 \
-    and True :
-        #print(code, name, volmax, topcls, hf.close.iloc[volmax-3 : volmax+3].tolist())
-        #sys.exit(0)
-        result              = [True, code, name.rjust(4), df.close.iloc[start], str(amount)+"亿", df.close.iloc[-1], grow, gaps, info]
-        return result
-    return ""
+    if grow > 1.5 : return ""
+    if not ((amount >= 5 and change >= 5) or (amount >= 8 and change >= 2) or (df.seal.iloc[-1] and change >= 5)) : return ""
+
+    info                    = str(qos) + "9 " + str(change).rjust(5) + "%"
+    result                  = [True, code, name.rjust(4), botcls, str(amount)+"亿", close[-1], grow, gaps, info]
+    return result
 def findBigsVolm(code, name, testFlag, df, hf, start, money, qos):
     info                    = ""
+    delta                   = 20
     close                   = df.close.tolist()
     amount                  = df.amount.iloc[-1]
     change                  = df.change.iloc[-1]
-    gaps                    = df.index[-1] - start
+    ammax                   = df.amount.tail(delta).max()
+    amidx                   = df.amount.tail(delta).idxmax()
+    gaps                    = df.index[-1] - amidx
     grow                    = round(close[-1] / min(close[-90:]), 2)
-    if df.amount.iloc[-1] < 8 : return ""
-    if close[-1] < df.cls5. iloc[-1] : return ""
-    if close[-1] < df.cls20.iloc[-1] : return ""
-
+    
+    if not (ammax > 10 and amount > ammax/2) : return ""
+    if close[-1] < df.cls20.iloc[-1]  : return ""
+    if df.seal.tail(delta).sum() == 0 : return ""
+    if not (change >= 5 or (amount >= 10 and change >=2)) : return ""
+    if close[-1] < close[amidx] : return ""
+    if grow > 1.6 : return ""
+    
     procMacdData(df)
     if df.dif.iloc[-1] < 0 : return ""
     if df.dif.iloc[-1] < df.dif.iloc[-2] : return ""
@@ -353,13 +365,9 @@ def findBigsVolm(code, name, testFlag, df, hf, start, money, qos):
     if hf.dif.iloc[-1] < 0 : return ""
     if hf.dif.iloc[-1] < hf.dea.iloc[-1] : return ""
     
-    delta                   = gaps if gaps > 30 else 30
-    volmax                  = df.change.tail(delta).idxmax()
-    clsmax                  = df.close.iloc[volmax-1:volmax+1].max()
-    if close[-1] < clsmax : return ""
-    
-    sealnum                 = df.grow.tail(delta).sum()
-    if sealnum == 0 : return ""
+    info                    = str(qos) + "9 " + str(change).rjust(5) + "%"
+    result                  = [True, code, name.rjust(4), close[start], str(amount)+"亿", close[-1], grow, gaps, info]
+    return result
 
     if True \
     and (change >= 5 or (amount >= 10 and change >=2)) \
@@ -456,7 +464,10 @@ def procMacdData(df) :
     del df['sema'], df['lema']
     #del df['macd']
     df['dlt']               = df.dif.shift(-1)
-    df['cross']             = [1 if (a<c and b>=c) else -1 if (a>0 and c>0 and a>=c and b<c) else 0 for a,b,c in zip(df.dif, df.dlt, df.dea)]
+    #df['cross']             = [1 if (a<c and b>=c) else -1 if (a>0 and c>0 and a>=c and b<c) else 0 for a,b,c in zip(df.dif, df.dlt, df.dea)]
+    df['cross']             = [1 if ((a<=0 or c<=0) and a<c and b>=c) else \
+                              -1 if ((a>0 and c>0) and a>=c and b<c)  else \
+                               0 for a,b,c in zip(df.dif, df.dlt, df.dea)]
     del df['dlt']
 def getDaysReplay(endDate, baseFile):
     global percnet, mlevel, clevel, glevel
@@ -815,87 +826,5 @@ def findDyasCross(code, name, testFlag, half, df, qos):
         sclose              = strClose(close[-1])
         result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[last], grow, gaps, info]
         #print(code, name, result, avgm, avgc)
-        return result
-    return []
-############################# half连续上涨 #########################
-def findHalfCross(code, name, testFlag, half, df, qos):
-    funcEntry               = False
-    info                    = ""
-    # half/日线强势
-    if df.close.iloc[-1]   <= df.cls20.iloc[-1]   : return []
-    if half.close.iloc[-1] <= half.cls20.iloc[-1] : return []
-    # 上穿30线后不破30线
-    last, cnt5, cnt10, cnt20= findCrossInfo(code, name, testFlag, half, 30)
-    if last == 0 :  return []
-    # 非回调最低点
-    midx                    = half.close.iloc[last:].idxmax()
-    if len(half) - midx >= 4 :
-        if half.close.iloc[midx:].min() == half.close.iloc[-1] : return []
-
-    amount                  = df.amount.iloc[-1]
-    change                  = df.change.iloc[-1]
-    close                   = half['close'].tolist()
-    grow                    = round(close[-1] / half.close[last], 2)
-    gaps                    = half.index.values[-1] - last
-    if testFlag:
-        print("test2", code, name, last, gaps, cnt10, cnt20, amount, change)
-    
-    # 不破10日线
-    if cnt10 == 0 :
-        info                = str(qos) + "9 P10 : L(" + str(cnt10) + ") " + str(change).rjust(5) + "%"
-    # 跌破10日线,不破20日线，又重回5日线
-    elif cnt10 > 0 and cnt20 == 0 and close[-1] >= half.cls5.iloc[-1] :
-        info                = str(qos) + "8 P10 : L(" + str(cnt10) + ") " + str(change).rjust(5) + "%"
-    # 跌破20日线,不破30日线,又重回10日线
-    elif cnt20 > 0 and close[-1] >= half.cls10.iloc[-1] :
-        info                = str(qos) + "7 P20 : L(" + str(cnt20)+ ") " + str(change).rjust(5) + "%"
-    
-    if info == "" : return []
-    procMacdData(df)
-    if df.dif.iloc[-1]     < df.dea.iloc[-1] : return []
-    if df.dea.iloc[-1]     < 0 : return []
-        
-    if True \
-    and ((amount >= 3 and change >= 3) or df.seal.iloc[-1])\
-    and gaps >= 24 \
-    and True :
-        sclose              = strClose(close[last])
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", close[-1], grow, gaps, info]
-        #print(code, name, result, avgm, avgc)
-        return result
-    return []
-###################################################################
-    #funcEntry               = False
-    vlist                   = df.where(df.jump == 1).dropna().index
-    point                   = vlist[-1] if len(vlist) else 0
-    gaps                    = len(df) - point
-    if not (gaps < delta and gaps > 3) : return []
-    
-    sumch                   = df['change'].iloc[point:].sum()
-    cost                    = 0
-    for i in range(point, len(df)):
-        avrg                = (df['close'].iloc[i] + df['high'].iloc[i] + df['low'].iloc[i]) / 3
-        cost                += avrg * (df['change'].iloc[i] / sumch)
-        if testFlag: print(i, df['close'].iloc[i], df['change'].iloc[i], sumch, avrg, cost)
-    cost                    = round(cost, 2)
-    mcls                    = df['close'].iloc[point]
-    mlst                    = df['close'].iloc[-1]
-    minval                  = df['close'].iloc[point:].min()
-    minval1                 = df['close'].tail(60).min()
-    grow                    = round(mlst / cost, 2)
-    grow1                   = round(mlst / minval1, 2)
-    change                  = df.change.iloc[-1]
-    amount                  = df.amount.iloc[-1]
-    if testFlag:
-        print(code, name, point, gaps, delta, mlst, cost, grow)
-    if grow >= 1.03 and grow <= 1.2 \
-    and ((change >= 5 and amount >= 5) or (change >= 2 and amount >= 8)) \
-    and minval > df['close'].iloc[point-1] \
-    and gaps <= 9 \
-    and grow1 < 1.5 \
-    and True :
-        sclose              = strClose(mcls)
-        info                = str(qos) + str(change).rjust(5) + "%" + "_" + str(cost)
-        result              = [True, code, name.rjust(4), sclose, str(amount)+"亿", mlst, grow, gaps, info]
         return result
     return []
