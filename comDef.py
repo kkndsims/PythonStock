@@ -88,7 +88,7 @@ def getStockCode(endDate) :
         baseInfo        = baseInfo[:-1]
         codeName        = baseInfo['名称'].tolist()
         codeList        = baseInfo['代码'].tolist()
-        print("%s :: line %3d : ############### CodeNum  = %d\n"\
+        print("%s :: line %3d : ############### CodeNum = %d\n"\
         %("comDef", sys._getframe().f_lineno, len(baseInfo))) 
     # 获取代码, 原始code格式 '="000001"'
     for i in os.listdir(dayipath):
