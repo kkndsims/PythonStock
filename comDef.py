@@ -206,8 +206,8 @@ def getChangeRate(name, data) :     # 计算换手率
     global baseInfo
     nameList            = baseInfo['名称'].tolist()
     idx                 = nameList.index(name)
-    volume              = baseInfo['流通股(亿)'][idx]
-    data['change']      = (data['volume'] / float(volume)).round(decimals=2)
+    volume              = baseInfo['流通市值Z'][idx].replace('亿', "")
+    data['change']      = (data['amount'] / float(volume) * 100).round(decimals=2)
     return data
 def getUpdateMap(endDate, code, name, tp) :
     if tp == 'half':
@@ -371,7 +371,7 @@ def sendMail(endDate, befDate):
         mail_host               = "smtp.163.com"
         mail_user               = "kkndsims@163.com"
         mail_pass               = "IIYCKAQYPWXFHYUD"
-        mail_pass               = "MAEUSTLPXPJZJOTF"    # pop3/SMTP/IMAP 授信
+        mail_pass               = "SVAVCOQRXJEFMGWF"    # pop3/SMTP/IMAP 授信
         sender                  = 'kkndsims@163.com'
         receivers               = ['xieweisims@163.com']
         message                 = MIMEMultipart()

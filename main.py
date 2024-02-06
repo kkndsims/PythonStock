@@ -9,20 +9,20 @@ from   comDef      import *
 if __name__ == '__main__' :
     endDate             = getWorkDay(datetime.datetime.now())
     befDate             = getLastWorkDay(datetime.datetime.now(), endDate)
-    #befDate             = '20231201'
-    #endDate             = '20231130'
+    #befDate             = '20231229'
+    #endDate             = '20231229'
     #sys.exit(0)
     
     getStockCode(endDate)       #获取股票中文名称
     #getPlateCode(endDate)       #获取板块中文名称
     
-    setUpdateHalfEn (True)      #使能处理half数据
+    #setUpdateHalfEn (True)      #使能处理half数据
     setUpdateDaysEn (True)      #使能处理日线数据
     procInitStockData(endDate)  #处理days/week/month数据
     
     testList            = []
-    #testList            = ['SH600679']  #上证
-    #testList            = ['SZ301152']  #深证
+    #testList            = ['SH601858']  #上证
+    #testList            = ['SZ300232']  #深证
     testFlag            = True if testList else False
     getStockImage(endDate, testFlag, testList)
         
@@ -32,7 +32,7 @@ if __name__ == '__main__' :
     #getPlatReplay(endDate, testFlag, testList)
       
     sendFlag            = True
-    sendFlag            = False
+    #sendFlag            = False
     if sendFlag and not testFlag  :
         print("\n%s :: line %3d : ############### 发送邮件 ###############"\
         %("comDef", sys._getframe().f_lineno))            
