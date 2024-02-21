@@ -29,6 +29,10 @@ topAmount               = 0
 topChange               = 0
 topGrow                 = 0
 
+dayAmount               = 5
+dayChange               = 3
+dayClose                = 66
+
 maxch                   = 0
 empty                   = pd.DataFrame()
 
@@ -57,7 +61,7 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
         if result : return result
         result          = findAjustGrow(code[2:], name, testFlag, days, half, 7.0, "8D.GtG.")
         if result : return result
-        result          = findWeekGrow1(code[2:], name, testFlag, days, half, 10, "7W.GtG")
+        result          = findWeekGrow1(code[2:], name, testFlag, days, half, 12, "7W.GtG")
         if result : return result  
 
     if findEnab and 1:  # 天量后调整不破
@@ -116,7 +120,7 @@ def findCrossVolm(code, name, testFlag, df, delta):
     for ma in vlList:
         del df['vol'+str(ma)]
     return gvlist
-############################# 日线大涨后调整 #######################
+############################# 日线大阳后连涨或回调破新高 #######################
 def findAjustGrow(code, name, testFlag, df, hf, wins, qos):
     info                = ""
     slist               = df.grow.where(df.grow >= wins).dropna().index
@@ -124,8 +128,12 @@ def findAjustGrow(code, name, testFlag, df, hf, wins, qos):
     point               = slist[-1]
     gaps                = df.index[-1] - point
     if gaps > 21 : return ""
+    if df.close.iloc[-1] < df.cls5.iloc[-1]  : return ""
+    if df.close.iloc[-1] < df.cls20.iloc[-1] : return ""
+    if df.close.iloc[-1] > dayClose : return ""
     if df.grow.iloc[-1] < 0 : return ""
-    
+    if df.high.iloc[-1] / df.close.iloc[-1] > (1 + wins/2) : return ""
+
     alist               = df.grow.iloc[point:].where(df.grow < 0).dropna().index
     close               = df['close'].tolist()
     change              = df['change'].iloc[-1]
@@ -134,57 +142,23 @@ def findAjustGrow(code, name, testFlag, df, hf, wins, qos):
     grow                = round(close[-1] / minval, 2)
     if len(alist) == 0 :
         info            = str(qos) + "9 " + str(change).rjust(5) + "%"
-        if df.grow.tail(9).where(df.grow >= wins).dropna().count() == 1 : return ""
-        if amount < 4 or change < 2 : return ""
+        #if df.grow.tail(9).where(df.grow >= wins).dropna().count() == 1 : return ""
+        if df.close.tail(37).idxmax() != df.index[-1] : return "" 
+        if (amount < dayAmount or change < dayChange) : return ""
     else :
         info            = str(qos) + "8 " + str(change).rjust(5) + "%"
         idx             = alist[0]
-        if close[-1] < close[idx] : return ""
+        if close[-1] < close[idx-1] : return ""   #连续2天站稳
+        if close[-2] < close[idx-1] : return ""
         if df.index[-1] == idx : return ""
-        if not (amount >= 4 and change > 2) : return ""
+        if not (amount > dayAmount and change > dayChange) : return ""
 
     if True \
     and True :
         result          = [True, code, name.rjust(4), close[point], str(amount)+"亿", close[-1], grow, gaps, info]
         return result 
     return ""
-def findWeekGrow1(code, name, testFlag, df, hf, wins, qos):
-    info                = ""
-    wk                  = getMergData("week", df)
-    slist               = wk.grow.where(wk.grow >= wins).dropna().index
-    if len(slist) == 0 : return ""
-    point               = slist[-1]
-    gaps                = wk.index[-1] - point
-    if gaps > 11 : return ""
-    if wk.grow.iloc[-1] < 0 : return ""
-    if df.grow.iloc[-1] < 0 : return ""
-    
-    alist               = wk.grow.iloc[point:].where(wk.grow < 0).dropna().index
-    close               = wk['close'].tolist()
-    change              = df['change'].iloc[-1]
-    amount              = df['amount'].iloc[-1]
-    minval              = df.close.tail(90).min()
-    grow                = round(close[-1] / minval, 2)
-    if len(alist) == 0 :
-        info            = str(qos) + "9 " + str(change).rjust(5) + "%"
-        if len(slist) == 1 : return ""
-        if close[-1] < close[slist[-2]] : return ""
-    else :
-        info            = str(qos) + "8 " + str(change).rjust(5) + "%"
-        idx             = alist[0]
-        if close[-1] < close[idx] : return ""
-        if df.index[-1] == idx : return ""
-        if testFlag :
-            print(code, name, close[idx], close[-1])
-            print(df.grow.iloc[point:])
-
-    if True \
-    and (amount >= 4 and change >= 2)\
-    and True :
-        result          = [True, code, name.rjust(4), close[point], str(amount)+"亿", close[-1], grow, gaps, info]
-        return result 
-    return ""
-############################# 成就放量后调整 #######################
+############################# 日线放量后连涨或回调破新高 #######################
 def findGreatVolm(code, name, testFlag, df, hf, qos):
     info                = ""
     gvlist              = findCrossVolm(code, name, testFlag, df, 1.5)
@@ -201,42 +175,92 @@ def findGreatVolm(code, name, testFlag, df, hf, qos):
     summoney            = df.amount.iloc[point-2:point+1].sum()
     if gaps > 30 : return ""
     if close[-1] < df.cls5.iloc[-1] : return ""
-    if not (sumchange >= 8 or summoney >= 10) : return ""
+    if close[-1] > dayClose : return ""
     if df.grow.iloc[-1] <= -5 : return ""
-    
+    if not (sumchange >= 8 or summoney >= 10) : return ""
+
     peak                = df.close.iloc[point-5:].idxmax()
     if peak == df.index[-1] :
         info            = str(qos) + "9." + str(change).rjust(5) + "%"
     else :
         info            = str(qos) + "8." + str(change).rjust(5) + "%"
-        if close[-1] <= close[peak+1] : return ""
+        if close[-1] < close[peak] : return ""  # 连续2天站稳
+        if close[-2] < close[peak] : return ""
     if info == "" : return ""
-    
+
     if True \
-    and ((amount > 4 and change > 2) or (amount > 3 and df.seal.iloc[-1])) \
+    and ((amount > dayAmount and change > dayChange) or (amount > (dayAmount - 1) and df.seal.iloc[-1])) \
     and (grow < 1.5 or (grow >= 1.5 and df.tur.iloc[-1])) \
     and True :
         result          = [True, code, name.rjust(4), close[peak], str(amount)+"亿", close[-1], grow, gaps, info]
         return result 
     return ""
+############################# 周线大阳后新高或回调破新高 #######################
+def findWeekGrow1(code, name, testFlag, df, hf, wins, qos):
+    info                = ""
+    change              = df['change'].iloc[-1]
+    amount              = df['amount'].iloc[-1]
+    if df.grow.iloc[-1] < 0 : return ""
+    if not ((amount > dayAmount and change > dayChange) or (amount > (dayAmount - 1) and df.seal.iloc[-1])) : return ""
+    
+    wk                  = getMergData("week", df)
+    close               = wk['close'].tolist()
+    if wk.high.iloc[-1] / close[-1] > 1.07 : return ""
+    if wk.grow.iloc[-1] < 0 : return ""
+    if close[-1] > dayClose : return ""
+    
+    # 找出最近涨幅超过wins的点
+    slist               = wk.grow.where(wk.grow >= wins).dropna().index
+    if len(slist) == 0 : return ""
+    point               = slist[-1]
+    gaps                = wk.index[-1] - point
+    if gaps > 17 : return ""
+    if gaps == 0 and len(wk.grow.tail(gaps + 10).where(wk.grow >= wins).dropna().index) < 2 : return ""
+    
+    alist               = wk.grow.iloc[point:].where(wk.grow < 0).dropna().index
+    minval              = df.close.tail(90).min()
+    grow                = round(close[-1] / minval, 2)
+    if len(alist) == 0 :
+        info            = str(qos) + "9 " + str(change).rjust(5) + "%"
+        if len(slist) == 1 : return ""  #第一次上涨未调整
+        if close[-1] < close[slist[-2]] : return ""     #调整破新高
+        if point - slist[-2] == 1 : return ""   # 两次大涨非连续，中间有调整
+        if point - slist[-2] > 16 : return ""   # 两次大涨未间隔太久
+    else :
+        info            = str(qos) + "8 " + str(change).rjust(5) + "%"
+        idx             = alist[0]
+        if close[-1] < close[idx] : return ""
+        if df.index[-1] == idx : return ""
+        if testFlag :
+            print(code, name, close[idx], close[-1])
+            print(df.grow.iloc[point:])
+
+    if True \
+    and True :
+        result          = [True, code, name.rjust(4), close[point], str(amount)+"亿", close[-1], grow, gaps, info]
+        return result 
+    return ""
+############################# 周线天量后新高或回调破新高 #######################
 def findWeekGrow2(code, name, testFlag, df, hf, qos):
     info                = ""
+    change              = df['change'].iloc[-1]
+    amount              = df['amount'].iloc[-1]
+    if not ((amount > dayAmount and change > dayChange) or (amount > (dayAmount - 1) and df.seal.iloc[-1])) : return ""
+    if df.close.iloc[-1] < df.cls5.iloc[-1] : return ""
+    if df.close.iloc[-1] > dayClose : return ""
+    if df.grow.iloc[-1]  <= -5 : return ""
+    
+    wins                = 52 # 1year
     week                = getMergData("week", df)
-    gvlist              = findCrossVolm(code, name, testFlag, week, 1.5)
-    if len(gvlist) == 0 : return ""
-    close               = week['close'].tolist()
-    change              = week['change'].iloc[-1]
-    amount              = week['amount'].iloc[-1]
-    point               = gvlist[-1] 
+    point               = week.change.tail(wins).idxmax()
     gaps                = week.index[-1] - point
-    minval              = week.close.iloc[point-10:].min()
+    if gaps > 17 : return ""
+    
+    minval              = week.close.tail(wins+5).min()
+    peak                = week.close.tail(wins+5).idxmax()
+    close               = week['close'].tolist()
     grow                = round(close[-1] / minval, 2)
-    
-    if gaps > 30 : return ""
-    if close[-1] < df.cls5.iloc[-1] : return ""
-    if df.grow.iloc[-1] <= -5 : return ""
-    
-    peak                = week.close.iloc[point-5:].idxmax()
+
     if peak == week.index[-1] :
         info            = str(qos) + "9." + str(change).rjust(5) + "%"
     else :
@@ -245,7 +269,6 @@ def findWeekGrow2(code, name, testFlag, df, hf, qos):
     if info == "" : return ""
     
     if True \
-    and ((amount > 4 and change > 2) or (amount > 3 and df.seal.iloc[-1])) \
     and (grow < 1.5 or (grow >= 1.5 and df.tur.iloc[-1])) \
     and True :
         result          = [True, code, name.rjust(4), close[peak], str(amount)+"亿", close[-1], grow, gaps, info]

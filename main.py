@@ -10,7 +10,7 @@ if __name__ == '__main__' :
     endDate             = getWorkDay(datetime.datetime.now())
     befDate             = getLastWorkDay(datetime.datetime.now(), endDate)
     #befDate             = '20231229'
-    #endDate             = '20231229'
+    #endDate             = '20240208'
     #sys.exit(0)
     
     getStockCode(endDate)       #获取股票中文名称
