@@ -206,8 +206,12 @@ def getChangeRate(name, data) :     # 计算换手率
     global baseInfo
     nameList            = baseInfo['名称'].tolist()
     idx                 = nameList.index(name)
+    # 实际换手率：去除大股东不流通换手
     volume              = baseInfo['流通市值Z'][idx].replace('亿', "")
     data['change']      = (data['amount'] / float(volume) * 100).round(decimals=2)
+    #data['change']      = baseInfo['换手Z'][idx]
+    volume              = baseInfo['流通股(亿)'][idx]
+    data['change1']     = (data['volume'] / float(volume)).round(decimals=2)
     return data
 def getUpdateMap(endDate, code, name, tp) :
     if tp == 'half':

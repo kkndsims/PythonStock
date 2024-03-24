@@ -5,7 +5,55 @@
 
 
 
+def findAjustGrow(code, name, testFlag, df, hf, wins, qos):
+    info                = ""
+    close               = df['close'].tolist()
+    change              = df['change'].iloc[-1]
+    amount              = df['amount'].iloc[-1]
+    minval              = df.close.tail(90).min()
+    grow                = round(close[-1] / minval, 2)
+    if df.tur.iloc[-1] == 0 : return ""
+    if df.tur.iloc[-2] == 1 : return ""
+    if grow > 1.5 : return ""
+    flag1               = amount >= dayAmount and change >= dayChange
+    flag2               = amount >= dayAmount - 1 and df.grow.iloc[-1] >= wins
+    if not (flag1 or flag2) : return ""
+    result          = [True, code, name.rjust(4), close[-1], str(amount)+"亿", close[-1], close[-1], close[-1], info]
+    return result 
+    
+    slist               = df.grow.where(df.grow >= wins).dropna().index
+    if len(slist) == 0 : return ""
+    point               = slist[-1]
+    gaps                = df.index[-1] - point
+    if gaps > 21 : return ""
+    if df.grow.iloc[-1] < 0 : return ""
+    point               = df.change1.tail(120).idxmax()
+    if df.close.iloc[-1] < df.close.iloc[point-2:point+2].max() : return ""
 
+    alist               = df.grow.iloc[point:].where(df.grow < 0).dropna().index
+    close               = df['close'].tolist()
+    change              = df['change'].iloc[-1]
+    amount              = df['amount'].iloc[-1]
+
+    if len(alist) == 0 :
+        info            = str(qos) + "9 " + str(change).rjust(5) + "%"
+        if df.close.tail(37).idxmax() != df.index[-1] : return "" 
+        if grow > 1.6 : return ""
+        return ""
+    else :
+        info            = str(qos) + "8 " + str(change).rjust(5) + "%"
+        idx             = alist[0]
+        if close[-1] < close[idx-1] : return ""   #连续2天站稳
+        if close[-2] < close[idx-1] : return ""
+        if df.index[-1] == idx : return ""
+        if grow > 1.6 : return ""
+
+    if True \
+    and (amount > dayAmount and change > dayChange) \
+    and True :
+        result          = [True, code, name.rjust(4), close[point], str(amount)+"亿", close[-1], grow, gaps, info]
+        return result 
+    return ""
 
 
 
