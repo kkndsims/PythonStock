@@ -111,7 +111,15 @@ def getPlateCode(endDate) :
         print("%s :: line %3d : ############### PlatesNum  = %d\n"\
         %("comDef", sys._getframe().f_lineno, len(plateInfo)))
     plateList           = [ "SH"+a.replace("\"", "").replace("=", "") for a in plateList]
-############################# 股票复盘 ###############################
+######################################################################
+############################# 设置日线/周线/月线使能 ##################
+def setUpdateHalfEn(flag):
+    global drawType
+    drawType.append('half')
+def setUpdateDaysEn(flag):
+    global drawType
+    drawType.append('days')
+############################# 处理天/周/月线数据 ####################
 def getPlatReplay(endDate, testFlag, testList):
     global rsltpath, plateList, plateName
     if not testFlag:
@@ -136,10 +144,11 @@ def getPlatReplay(endDate, testFlag, testList):
         data.columns    = ['date','open','high','low','close','volume','amount']
         data            = data[~data['volume'].isin([0])] 
         data['amount']  = (data['amount'] / amountUnit).round(decimals=1)
+        data['volume']  = (data['volume'] / 10000).round(decimals=1)
+        data['grow']    = ((data['close']  / data['close'].shift(1) - 1) * 100).round(decimals=2)
         data.sort_values('date', ascending=True, inplace=True)
         if len(data) <= 1:
             continue
-        procPlateInfo(data, 20, 10)
         rst             = findPlateBuy(code, name, testFlag, data)
         if str(rst[0]) == 'True':
             update_plate.append(rst)
@@ -151,21 +160,8 @@ def getPlatReplay(endDate, testFlag, testList):
         df.columns      = ['flag', 'code', 'name', 'close', 'amount', 'bot', 'grow', 'days', 'info']
         del df['flag']
         df.sort_values('info', ascending=False, inplace=True)
-        print(df)            
-def procPlateInfo(df, tur, gap) :
-    df['volume']        = ( df['volume'] / 10000     ).round(decimals=1)
-    df['grow']          = ((df['close']  / df['close'].shift(1) - 1) * 100).round(decimals=2)
-    df['rate']          = ((df['amount'] / df['amount'].shift(1)- 1) * 100).round(decimals=1)
-    procBasicInfo(df, tur, gap)
-######################################################################
-############################# 设置日线/周线/月线使能 ##################
-def setUpdateHalfEn(flag):
-    global drawType
-    drawType.append('half')
-def setUpdateDaysEn(flag):
-    global drawType
-    drawType.append('days')
-############################# 处理天/周/月线数据 ####################
+        print(df)
+        
 def procInitStockData(endDate) :   
     global codeList, codeName
     output                      = rsltpath + endDate
@@ -366,8 +362,6 @@ def getStockImage(endDate, testFlag, testCode):
                 #writer          = pd.ExcelWriter(ofile)
                 #df.to_excel(excel_writer=writer, sheet_name='sheet1')
                 df.to_csv(ofile, index=False, encoding="GBK")
-                #print(ofile)
-                #df.to_excel(ofile)
 ############################# 发送处理邮件 ##########################         
 def sendMail(endDate, befDate):
     if True:
