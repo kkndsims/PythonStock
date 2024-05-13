@@ -7,12 +7,11 @@ Created on Mon Oct 10 22:59:41 2016
 @author: Administrator
 """
 
-import os
+import os #, datetime
 import sys
 import pandas as pd
 import numpy  as np
 import warnings
-import datetime
 
 warnings.filterwarnings( "ignore" )
 
@@ -28,6 +27,7 @@ macdMidd                = 18 if isMacdMode == 1 else 9
 dayAmount               = 4
 dayChange               = 3
 dyaLevel                = 0.95
+growLevel               = 1.6
 dayClose                = 66
 
 weekOfYear              = 52 * 4
@@ -45,18 +45,24 @@ times                   = 2
 ######################################################################
 ############################# 板块算法处理买点 ########################
 ######################################################################
-def findPlateBuy(code, name, testFlag, days):
+def findPlateBuy(code, name, baseInfo, testFlag, days):
     week                = pd.DataFrame()
     # 日线站上5/10/20线
     flag                = washPlateData(code, name, days)
     if  flag == False : return flag, code, name
     
-    if 1 :
+    if True :
+        # 板块有涨停且周线破新高
+        value           = baseInfo.loc[ baseInfo['名称'] == name] 
+        if int(value['涨停数'].iloc[-1]) < 2 : return False, code, name
+        week            = getMergData("week", days)
+        procTurtleData(week, maList[-1])
+        if week.tur.iloc[-1] == 0 : return False, code, name
+        
         result          = findPlateDaysMacd(code[2:], name, testFlag, days, week, "9PD.")
         if result : return result
-        
-        week            = getMergData("week", days)
-        flag            = findPlateWeekMacd(code[2:], name, testFlag, days, week, "8PW.")
+    
+        result          = findPlateWeekMacd(code[2:], name, testFlag, days, week, "8PW.")
         if result : return result
 
     return False, code, name
@@ -72,7 +78,7 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
     half                = readDataFromFile(code, name, hfile)
     isSeal              = info['封单额'].iloc[-1] != '--  ' or days.grow.iloc[-1] > 9.5
     tolAmount           = float(info['流通市值'].iloc[-1].replace("亿","").replace(" ",""))
-    if isSeal and 1 :
+    if isSeal and 0 :
         result          = findSealGrow(code[2:], name, testFlag, days, half, tolAmount, "9S.")
         if result : return result
 
@@ -80,10 +86,17 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
     flag                = washDaysData(code, name, days, half)
     if  flag == False : return flag, code, name
     
+    # 月线dif站上0轴
+    mth                 = getMergData("month", days)
+    flag                = washMonthData(code, name, mth, days)
+    if  flag == False : return flag, code, name
+    
+    # 日/周线共振
     week                = getMergData("week", days)
     flag                = washWeekData(code, name, week, days)
     if  flag == False : return flag, code, name
-
+    procMacdData(week)
+    
     if findEnab and 1 :
         # 日线dif调整后上涨中继
         result          = findDaysDif(code[2:], name, testFlag, days, week, "8D.")
@@ -101,13 +114,17 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
         # 周线连续放量且破新高
         result          = findWeekVol1(code[2:], name, testFlag, week, days, "6W.V8")
         if result : return result
+        # 周线连续放量且破新高
+        result          = findDaysVol1(code[2:], name, testFlag, week, days, "5D.V9")
+        if result : return result
 
     return False, code, name
     sys.exit(0)
 
-############################# 日线清洗数据 ####################
+############################# 日/周/月线清洗数据 ####################
 def washDaysData(code, name, days, half) :
     if len(days) < maList[-1] : return False
+    if days.close.iloc[-1] > dayClose : return False
     # 站上均线
     for ma in maList:
         days['cls'+str(ma)] = days.close.rolling(ma).mean().round(decimals=2)
@@ -122,23 +139,34 @@ def washDaysData(code, name, days, half) :
     if days.tur.tail(10).sum() == 0 : return False
 
     # 日线活跃有量或大阳
+    for ma in vlList:
+        days['vol'+str(ma)] = days.volume.rolling(ma).mean().round(decimals=2)
     days['lvl'] = [ 1 if a >= 3 and b >= 2 else 0 for a,b in zip(days.amount, days.change)]
     flag1       = days.grow.tail(10).where(days.grow >= 5).dropna().sum()
     flag2       = days.lvl.tail(10).sum()
     del days['lvl']
     if not (flag1 and flag2) : return False
     return True
-############################# 周线清洗数据 ####################
+def washMonthData(code, name, mth, days) :
+    procMacdData(mth)
+    if mth.delta.iloc[-1] < mth.delta.iloc[-2] : return False
+    if mth.dif.iloc[-1] - mth.dea.iloc[-1] < -0.1 : return False
+    if mth.dif.iloc[-1] < -0.3 : return False
+    del mth['dif'], mth['dea'], mth['delta'], mth['cross']
+    del mth['tur'], mth['seal'], mth['vol5'], mth['vol10']
+    return True
 def washWeekData(code, name, week, days) :
-    del week['seal']
-    if week.close.iloc[-1] < week.close.iloc[-2] : return False
-    
+    procMacdData(week)
+    if week.delta.iloc[-1] < week.delta.iloc[-2] : return False
+    if week.dif.iloc[-1] - week.dea.iloc[-1] < -0.1 : return False
+    if week.dif.iloc[-1] < -0.3 : return False
     for ma in maList[:2]:
         week['cls'+str(ma)] = week.close.rolling(ma).mean().round(decimals=2)
     if week.close.iloc[-1]  < week['cls5' ].iloc[-1] : return False
     if week.close.iloc[-1]  < week['cls10'].iloc[-1] : return False
     for ma in maList[:2]:
         del week['cls'+str(ma)]
+    del week['seal'], week['dif'], week['dea']
     
     for ma in vlList:
         week['vol'+str(ma)] = week.volume.rolling(ma).mean().round(decimals=2)
@@ -177,7 +205,7 @@ def findMacdCross(code, name, testFlag, df, otype):
     P1              = adj[-1] if len(adj) else 0
     P2              = ctn[-1] if len(ctn) else 0
     if testFlag :
-        print(code, name, [P0, P1, P2])
+        print("findMacdCross", code, name, [P0, P1, P2])
     return [P0, P1, P2]
 ############################# 日线/周线放量区间 ##########################
 def findVolCross2(code, name, testFlag, df, wins, otype) :
@@ -261,45 +289,33 @@ def findDaysDif(code, name, testFlag, df, wk, qos):
     close           = df['close'].tolist()
     change          = df['change'].iloc[-1]
     amount          = df['amount'].iloc[-1]
-    grow            = round(close[-1] / close[P0-1], 2)
     gaps            = df.index[-1] - P0
-    if df.seal.iloc[P0:].sum() == 0 : return ""
+    #if df.seal.iloc[P0:].sum() == 0 : return ""
     if not (amount >= dayAmount and change >= dayChange) : return ""
     if df.delta.iloc[-1] < df.delta.iloc[-2] : return ""
     if df.delta.iloc[-2] < df.delta.iloc[-3] : return ""
-
-    # dif cross dea <  0轴, days/week/month共振
-    # dif cross dea >= 0轴, days/week/month共振
-    if (P1 + P2 == 0) or (P1 > 0 and P2 > 0) :
-        procMacdData(wk)
-        gaps        = df.index[-1] - P2 if P2 else gaps
-        grow        = round(wk.close.iloc[-1] / wk.close.tail(20).min(), 2)
-        if grow > 1.7 : return ""
-        if wk.delta.iloc[-1] < wk.delta.iloc[-2] : return ""
-        if wk.dif.iloc[-1] >= wk.dea.iloc[-1] :
-            if wk.dea.iloc[-1] >= 0 : 
-                mth     = getMergData("month", df)
-                info    = str(qos) + "8.DW  " + str(change).rjust(5) + "%"
-                procMacdData(mth)
-                if mth.delta.iloc[-1] < mth.delta.iloc[-2] : return ""
-                if mth.dif.iloc[-1] >= mth.dea.iloc[-1] >= 0 : 
-                    info= str(qos) + "9.DWM " + str(change).rjust(5) + "%"
-            else :
-                if P2 == 0 : return ""
-                if df.seal.iloc[P1:].sum() == 0 : return ""
-                info    = str(qos) + "7.D   " + str(change).rjust(5) + "%"
-    # 日线聚集,缩量新高
-    else :
-        print(code, name, P0, P1, P2, info)
-        info        = str(qos) + "6.D   " + str(change).rjust(5) + "%"
+    grow            = round(wk.close.iloc[-1] / wk.close.tail(20).min(), 2)
     
-    clsmax          = max(max(close[P0:]), max(close[-20:]))
-    if close[-1] < clsmax * dyaLevel : return ""
+    # days dif cross dea, week调整结束，days/week共振
+    if (P1 + P2 == 0) :
+        info        = str(qos) + "8.W  " + str(change).rjust(5) + "%"
+    # days dif cross dea, dif未拉回0轴，微调后破新高
+    elif (P1 > 0 and P2 == 0) :
+        if df.tur.iloc[-1] == 0 : return ""
+        info        = str(qos) + "8.D  " + str(change).rjust(5) + "%"
+    # days dif cross dea, 调整拉回0轴又破新高
+    elif (P1 > 0 and P2 > 0) :
+        gaps        = df.index[-1] - P2 if P2 else gaps
+        info        = str(qos) + "7.W  " + str(change).rjust(5) + "%"
+        if wk.tur.iloc[-1] == 0 : return ""
+    else :
+        info        = str(qos) + "7.D  " + str(change).rjust(5) + "%"
     if info == "" : return ""
     if testFlag:
         print(code, name, P0, P1, P2, info)
-    
+
     if True \
+    and grow < growLevel \
     and True :
         result          = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], grow, gaps, info]
         return result 
@@ -318,9 +334,8 @@ def findWeekDif(code, name, testFlag, df, wk, qos):
     if df.delta.iloc[-1] < df.delta.iloc[-2] : return ""
     if df.delta.iloc[-2] < df.delta.iloc[-3] : return ""
     if wk.delta.iloc[-1] < wk.delta.iloc[-2] : return ""
-    #if close[-1] < wk.close.tail(max(gaps,20)).max() * 0.85 : return ""
     if not (amount >= dayAmount and change >= dayChange) : return ""
-    if grow > 1.7 : return ""
+    if grow > growLevel : return ""
     if testFlag :
         print(code, name, P0, P1, P2)
 
@@ -355,15 +370,16 @@ def findWeekVol2(code, name, testFlag, wk, df, qos):
     high                = wk.close.iloc[point-3:point+3].max()
     if gaps > delta : return "" 
     if wk.close.iloc[-1] < high * 0.95 : return ""
+    if wk.dif.iloc[-1] < -0.1 : return ""
     
-    minval              = wk.close.iloc[point-delta:].min()
+    minval              = wk.close.tail(max(gaps, delta)).min()
     close               = wk['close'].tolist()
     grow                = round(close[-1] / minval, 2)
     if testFlag :
         print(code, name, gaps, wk.close.iloc[-1], wk.close.iloc[point])
         
     if True \
-    and grow < 1.6 \
+    and grow < growLevel \
     and (amount >= dayAmount and change >= dayChange) \
     and True :
         info            = str(qos) + "  " + str(change).rjust(5) + "%"
@@ -383,13 +399,38 @@ def findWeekVol1(code, name, testFlag, wk, df, qos):
     minval              = wk.close.tail(max(gaps, 30)).min()
     grow                = round(close[-1] / minval, 2)
     if gaps >= 15 : return ""
-    if wk.dif.iloc[-1] < 0 : return ""
+    if wk.dif.iloc[-1] < -0.1 : return ""
     if testFlag :
         print(code, name, P1, P2, wk.index[-1], gaps, grow)
         print(wk.tail(30))
         
     if True \
-    and grow < 1.6 \
+    and grow < growLevel \
+    and (amount >= dayAmount and change >= dayChange) \
+    and True :
+        info            = str(qos) + "  " + str(change).rjust(5) + "%"
+        result          = [True, code, name.rjust(4), minval, str(amount)+"亿", close[-1], grow, gaps, info]
+        return result 
+    return ""
+def findDaysVol1(code, name, testFlag, wk, df, qos):
+    info                = ""
+    P1, P2              = findVolCross1(code, name, testFlag, df, 10, "days")
+    if P1 == 0 : return ""
+    
+    change              = df['change'].iloc[-1]
+    amount              = df['amount'].iloc[-1]
+    close               = wk['close'].tolist()
+    gaps                = df.index[-1] - P1
+    minval              = df.close.tail(max(gaps, 120)).min()
+    grow                = round(close[-1] / minval, 2)
+    if gaps >= 15 : return ""
+    if df.dif.iloc[-1] < 0 : return ""
+    if testFlag :
+        print(code, name, P1, P2, df.index[-1], gaps, grow)
+        print(df.tail(30))
+        
+    if True \
+    and grow < growLevel \
     and (amount >= dayAmount and change >= dayChange) \
     and True :
         info            = str(qos) + "  " + str(change).rjust(5) + "%"
@@ -426,6 +467,20 @@ def getDaysReplay(endDate, baseFile):
     down05              = len(df[df['grow'] <=  -5])
     print("涨停个数(%3d), >=5个数(%3d)" %(grow10, grow05))
     print("跌停个数(%3d), <=5个数(%3d)" %(down10, down05))
+def getPlatReplay(endDate, bs):
+    bs                  = bs[bs['涨跌数'] != '--  ']
+    bs['总金额']         = (bs['总金额'] / 10000).round(decimals=1)
+    bs['total']         = [int(a.split(',')[0]) + int(a.split(',')[1]) for a in bs['涨跌数']]
+    bs['snum']          = [int(a) for a in bs['涨停数']]
+    bs['srate']         = (bs['snum']  / bs['total']).round(decimals=3)
+    bs['sel']           = [1 if ((a >= 0.1 and c >= 2) or (a >= 0.05 and c >= 3)) \
+                           and float(b) > 0 else 0 \
+                           for a,b,c in zip(bs.srate, bs['涨幅%'], bs.snum)]
+    sr = bs[bs['sel'] == 1]
+    sr.sort_values('snum', ascending=False, inplace=True)
+    #print(sr[['代码', '名称', '涨跌数', 'total', '涨停数', 'snum', 'srate']])
+    print(sr[['代码', '名称', 'total', 'snum', 'srate', '总金额', '换手Z']])
+    print("\n%s :: line %3d : 板块涨停率 >=5%%个数(%3d)\n" %("comDef", sys._getframe().f_lineno, len(sr)))
 def washPlateData(code, name, days) :
     for ma in maList:
         days['cls'+str(ma)] = days.close.rolling(ma).mean().round(decimals=2)
@@ -442,14 +497,16 @@ def findPlateDaysMacd(code, name, testFlag, df, wk, qos) :
     P0, P1, P2          = findMacdCross(code, name, testFlag, df, "days")
     if P0 == 0 : return ""
     if df.amount.iloc[-1] < 30 : return ""
-    if df.grow.iloc[-1] < 0.5  : return ""
-
+    if df.delta.iloc[-1]  < df.delta.iloc[-2] : return ""
+    if df.delta.iloc[-2]  < df.delta.iloc[-3] : return ""
+    
     gaps                = df.index[-1] - P0
     close               = df.close.tolist()
     amount              = df['amount'].iloc[-1]
-    info                = str(qos) + "8  "
-    if df.delta.iloc[-1] < df.delta.iloc[-2] : return ""
-    if df.delta.iloc[-2] < df.delta.iloc[-3] : return ""
+    procMacdData(wk)
+    if wk.delta.iloc[-1] < wk.delta.iloc[-2] : return ""
+    if wk.delta.iloc[-1] < 0 : return ""
+    if wk.dea.iloc[-1] < 0 : return ""
     if (P1 > 0 and P2 > 0) :
         gaps            = df.index[-1] - P2 if P2 else gaps
         info            = str(qos) + "9  "
@@ -459,13 +516,18 @@ def findPlateWeekMacd(code, name, testFlag, df, wk, qos) :
     info                = ""
     P0, P1, P2          = findMacdCross(code, name, testFlag, wk, "week")
     if P0 == 0 : return ""
+    if df.grow.iloc[-1] < 1 : return ""
+    if wk.grow.iloc[-1] < 1 : return ""
+    if df.amount.iloc[-1]< 100 : return "" 
+    if wk.tur.iloc[-1] == 0 : return ""
 
-    gaps                = wk.index[-1] - P0
     close               = wk.close.tolist()
     amount              = wk['amount'].iloc[-1]
     if wk.delta.iloc[-1] < wk.delta.iloc[-2] : return ""
     if P2 > 0 :
+        gaps            = wk.index[-1] - P2
         info            = str(qos) + "9  "
+    if info == "" : return ""
     result              = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], wk.grow.iloc[-1], gaps, info]
     return result
 ######################################################################
@@ -508,7 +570,7 @@ def procMacdData(df) :
     df['delta']             = df.dif - df.dea
     df['cross']             = [1 if (a<b and c>=d) else -1 if (a>=b and c<d) else 0 \
                               for a,b,c,d in zip(df.sdif, df.sdea, df.dif, df.dea)]
-    df['cross']             = [2 if (a==1 and b>=0) else 1 if(a==1 and b<0) else a \
+    df['cross']             = [2 if (a==1 and b>=-0.1) else 1 if(a==1 and b<0) else a \
                               for a,b in zip(df.cross, df.dif)]
     #del df['dea']
     del df['sdif'], df['sdea']

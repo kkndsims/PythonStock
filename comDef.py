@@ -120,7 +120,7 @@ def setUpdateDaysEn(flag):
     global drawType
     drawType.append('days')
 ############################# 处理天/周/月线数据 ####################
-def getPlatReplay(endDate, testFlag, testList):
+def getPlatImage(endDate, testFlag, testList):
     global rsltpath, plateList, plateName
     if not testFlag:
         iputList        = [[a, b] for a, b in zip(plateList, plateName)]
@@ -128,7 +128,10 @@ def getPlatReplay(endDate, testFlag, testList):
         iputList        = [[a, plateName[plateList.index(a)]] for a in testList]
     print("\n%s :: line %3d : ############### 处理板块 with PlateNum = %d"\
     %("comDef", sys._getframe().f_lineno, len(iputList)))
-        
+    
+    # 板块复盘
+    getPlatReplay(endDate, plateInfo)
+            
     starttime           = datetime.datetime.now() 
     update_plate        = []
     for i in range (len(iputList)) :
@@ -137,6 +140,10 @@ def getPlatReplay(endDate, testFlag, testList):
         daysfile        = dayipath + code
         if not os.path.exists(daysfile) :
             print(code, name, daysfile, "not exist")
+            continue
+        
+        value           = plateInfo.loc[ plateInfo['名称'] == name] 
+        if int(value['总金额'].iloc[-1]) == 0:
             continue
         
         data            = pd.read_csv(daysfile,encoding='gbk',header=2)
@@ -149,7 +156,7 @@ def getPlatReplay(endDate, testFlag, testList):
         data.sort_values('date', ascending=True, inplace=True)
         if len(data) <= 1:
             continue
-        rst             = findPlateBuy(code, name, testFlag, data)
+        rst             = findPlateBuy(code, name, plateInfo, testFlag, data)
         if str(rst[0]) == 'True':
             update_plate.append(rst)
     endtime             = datetime.datetime.now()
@@ -363,7 +370,7 @@ def getStockImage(endDate, testFlag, testCode):
                 #df.to_excel(excel_writer=writer, sheet_name='sheet1')
                 df.to_csv(ofile, index=False, encoding="GBK")
 ############################# 发送处理邮件 ##########################         
-def sendMail(endDate, befDate):
+def sendMail(endDate):
     if True:
     #if False:
         mail_host               = "smtp.163.com"
@@ -398,32 +405,6 @@ def sendMail(endDate, befDate):
         nfile                       = "attachment;filename=\"" + "buy.txt" + "\""
         att['Content-Disposition']  = nfile
         message.attach(att)
-        
-    # 对比今天和前一个工作日的差异
-    output1                     = rsltpath + befDate
-    if os.path.exists(output1):
-        ofile1                  = output1 + '\\buy.txt'
-        ofile2                  = output  + '\\diff.txt'
-        df                      = pd.read_csv(ofile , parse_dates=[0], encoding='gbk')
-        df1                     = pd.read_csv(ofile1, parse_dates=[0], encoding='gbk')
-        empty                   = pd.DataFrame(columns=['code','name','close','amount','bot','grow','days','info'])
-        code                    = df['code'].tolist()
-        code1                   = df1['code'].tolist()
-        diff                    = list(set([i for i in code if i not in code1]))
-        for i in range(len(diff)):
-            idx                 = df[(df.code==diff[i])].index.tolist()[0]
-            empty.loc[i]        = df.loc[idx]
-        empty.to_csv(ofile2, index=False, encoding="GBK")
-        print("different code with before workday")
-        print(empty)
-
-        att                         = MIMEText(open(ofile2, 'rb').read(), 'base64','utf-8')
-        att['Content-Type']         = 'application/octet-stream'
-        nfile                       = "attachment;filename=\"" + "diff.txt" + "\""
-        att['Content-Disposition']  = nfile
-        message.attach(att)
-    else :
-        print("before workday %s not exists" %(befDate))
         
     # 添加一个文本附件
     output                      = rsltpath + endDate
