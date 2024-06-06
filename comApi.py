@@ -7,13 +7,15 @@ Created on Mon Oct 10 22:59:41 2016
 @author: Administrator
 """
 
-import os #, datetime
+import os, datetime
 import sys
 import pandas as pd
 import numpy  as np
 import warnings
 
 warnings.filterwarnings( "ignore" )
+
+minipath                = "C:\\new_tdx\\T0001\\export\\m\\"         #5分钟原始数据
 
 vlList                  = [5, 10]
 maList                  = [5, 10, 20]
@@ -24,15 +26,18 @@ macdFast                = 24 if isMacdMode == 1 else 12
 macdSlow                = 52 if isMacdMode == 1 else 26
 macdMidd                = 18 if isMacdMode == 1 else 9
 
-dayAmount               = 4
+dayAmount               = 5
 dayChange               = 3
 dyaLevel                = 0.95
-growLevel               = 1.6
+dltLevel                = 0.35
+growLevel               = 1.65
 dayClose                = 66
 
 weekOfYear              = 52 * 4
 daysOfYear              = 250 * 1.2
-
+longProcType            = ['week']
+shortProcType           = ['days']
+    
 maxch                   = 0
 empty                   = pd.DataFrame()
 
@@ -75,57 +80,35 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
     maxch               = len(name) if len(name) > maxch else maxch
     name                = name.rjust(maxch)
     days                = readDataFromFile(code, name, dfile)
-    half                = readDataFromFile(code, name, hfile)
-    isSeal              = info['封单额'].iloc[-1] != '--  ' or days.grow.iloc[-1] > 9.5
-    tolAmount           = float(info['流通市值'].iloc[-1].replace("亿","").replace(" ",""))
-    if isSeal and 0 :
-        result          = findSealGrow(code[2:], name, testFlag, days, half, tolAmount, "9S.")
+    #isSeal              = info['封单额'].iloc[-1] != '--  ' or days.grow.iloc[-1] > 9.5
+    #tolAmount           = float(info['流通市值'].iloc[-1].replace("亿","").replace(" ",""))
+    # 日线站上5/10/20线
+    flag                = washDaysData(code, name, days)
+    if  flag == False : return flag, code, name
+    
+    #flag, week          = washWeekData(code, name, days)
+    #if  flag == False : return flag, code, name
+    
+    if findEnab and 1 :
+        result          = findSealGrow(code[2:], name, testFlag, days, days, "9S.")
         if result : return result
 
-    # 日线站上5/10/20线
-    flag                = washDaysData(code, name, days, half)
-    if  flag == False : return flag, code, name
-    
-    # 月线dif站上0轴
-    mth                 = getMergData("month", days)
-    flag                = washMonthData(code, name, mth, days)
-    if  flag == False : return flag, code, name
-    
-    # 日/周线共振
-    week                = getMergData("week", days)
-    flag                = washWeekData(code, name, week, days)
-    if  flag == False : return flag, code, name
-    procMacdData(week)
-    
     if findEnab and 1 :
         # 日线dif调整后上涨中继
-        result          = findDaysDif(code[2:], name, testFlag, days, week, "8D.")
+        result          = findDaysGrow(code[2:], name, testFlag, days, days, "8D.")
         if result : return result
-        # 周线dif调整后上涨中继
-        result          = findWeekDif(code[2:], name, testFlag, days, week, "7W.")
-        if result : return result
-
-    if findEnab and 1 :
-        if days.tur.iloc[-1] == 0 : return False, code, name
-        if week.tur.iloc[-1] == 0 : return False, code, name
-        # 周线天量后调整破新高
-        result          = findWeekVol2(code[2:], name, testFlag, week, days, "6W.V9")
-        if result : return result
-        # 周线连续放量且破新高
-        result          = findWeekVol1(code[2:], name, testFlag, week, days, "6W.V8")
-        if result : return result
-        # 周线连续放量且破新高
-        result          = findDaysVol1(code[2:], name, testFlag, week, days, "5D.V9")
+        
+        result          = findHalfGrow(code[2:], name, testFlag, days, days, "7H.")
         if result : return result
 
     return False, code, name
     sys.exit(0)
 
 ############################# 日/周/月线清洗数据 ####################
-def washDaysData(code, name, days, half) :
+def washDaysData(code, name, days) :
     if len(days) < maList[-1] : return False
     if days.close.iloc[-1] > dayClose : return False
-    # 站上均线
+    # 日线站上5/10/20均线
     for ma in maList:
         days['cls'+str(ma)] = days.close.rolling(ma).mean().round(decimals=2)
     if days.close.iloc[-1]  < days['cls5' ].iloc[-1] : return False
@@ -134,70 +117,91 @@ def washDaysData(code, name, days, half) :
     for ma in maList:
         del days['cls'+str(ma)]
         
-    days['seal']            = [ 1 if a >= 9.7 else 0 for a in days.grow]
     procTurtleData(days, maList[-1])
-    if days.tur.tail(10).sum() == 0 : return False
+    procMacdData(days)
+    if days.dif.iloc[-1] < -0.1 : return ""
+    days['seal']            = [ 1 if a >= 9.7 else 0 for a in days.grow]
+    del days['open'], days['low'], days['volume']
 
-    # 日线活跃有量或大阳
-    for ma in vlList:
-        days['vol'+str(ma)] = days.volume.rolling(ma).mean().round(decimals=2)
-    days['lvl'] = [ 1 if a >= 3 and b >= 2 else 0 for a,b in zip(days.amount, days.change)]
-    flag1       = days.grow.tail(10).where(days.grow >= 5).dropna().sum()
-    flag2       = days.lvl.tail(10).sum()
-    del days['lvl']
-    if not (flag1 and flag2) : return False
+    # 成交活跃有量或大阳
+    vtype       = 0
+    flag1       = days.seal.tail(10).sum()
+    flag2       = days.amount.iloc[-1] >= dayAmount and days.change.iloc[-1] >= dayChange
+    flag21      = days.amount.tail(10).where(days.amount >= dayAmount).dropna().sum()
+    flag3       = days.grow.tail(10).where(days.grow >= 5).dropna().sum()
+    flag4       = days.tur.tail(10).sum()
+    if vtype :
+        if not (flag1 or flag2 or flag3) : return False
+    else :
+        if not (flag1 or flag2 or flag21 or flag3 or flag4) : return False
     return True
-def washMonthData(code, name, mth, days) :
-    procMacdData(mth)
-    if mth.delta.iloc[-1] < mth.delta.iloc[-2] : return False
-    if mth.dif.iloc[-1] - mth.dea.iloc[-1] < -0.1 : return False
-    if mth.dif.iloc[-1] < -0.3 : return False
-    del mth['dif'], mth['dea'], mth['delta'], mth['cross']
-    del mth['tur'], mth['seal'], mth['vol5'], mth['vol10']
-    return True
-def washWeekData(code, name, week, days) :
+def washWeekData(code, name, days) :
+    week        = getMergData("week", days)
     procMacdData(week)
-    if week.delta.iloc[-1] < week.delta.iloc[-2] : return False
-    if week.dif.iloc[-1] - week.dea.iloc[-1] < -0.1 : return False
-    if week.dif.iloc[-1] < -0.3 : return False
     for ma in maList[:2]:
         week['cls'+str(ma)] = week.close.rolling(ma).mean().round(decimals=2)
-    if week.close.iloc[-1]  < week['cls5' ].iloc[-1] : return False
-    if week.close.iloc[-1]  < week['cls10'].iloc[-1] : return False
+    if week.close.iloc[-1]  < week['cls5' ].iloc[-1] : return False, week
+    if week.close.iloc[-1]  < week['cls10'].iloc[-1] : return False, week
     for ma in maList[:2]:
         del week['cls'+str(ma)]
-    del week['seal'], week['dif'], week['dea']
-    
-    for ma in vlList:
-        week['vol'+str(ma)] = week.volume.rolling(ma).mean().round(decimals=2)
-    procTurtleData(week, maList[-1])
-    return True
+    return True, week
 ############################# 合并月/周线数据 ######################
 def getMergData(otype, data) :
     period              = "W" if otype == "week" else "M"
     data['date']        = pd.to_datetime(data['date']) #把字符串转换成时间信息    
     data                = data.set_index('date')
     df2                 = data.resample          (period,closed="right",label="right").last()
-    #df2['open']         = data['open'].resample  (period,closed="right",label="right").first().round(decimals=2) 
-    df2['high']         = data['high'].resample  (period,closed="right",label="right").max().round(decimals=2) 
-    df2['low']          = data['low'].resample   (period,closed="right",label="right").min().round(decimals=2) 
+    df2                 = df2[~df2['amount'].isin([0])]
+    df2                 = df2.dropna()
+    if 'seal' in df2.columns : del df2['seal']
+    if 'tur'  in df2.columns : del df2['tur']
+    if 'dif'  in df2.columns : del df2['dif']
+    if 'dea'  in df2.columns : del df2['dea']
+    if 'delta'in df2.columns : del df2['delta']
+    if 'cross'in df2.columns : del df2['cross']
+    if 'oepn' in df2.columns:
+        #df2['open']     = data['open'].resample  (period,closed="right",label="right").first().round(decimals=2)
+        del df2['open']
+    if 'high' in df2.columns:
+        df2['high']     = data['high'].resample  (period,closed="right",label="right").max().round(decimals=2)
+    if 'low' in df2.columns:
+        #df2['low']      = data['low'].resample   (period,closed="right",label="right").min().round(decimals=2) 
+        del df2['low']
     df2['close']        = data['close' ].resample(period,closed="right",label="right").last().round(decimals=2)    
-    df2['volume']       = data['volume'].resample(period,closed="right",label="right").sum().round(decimals=1)  
-    df2['amount']       = data['amount'].resample(period,closed="right",label="right").sum().round(decimals=1)
+    if 'volume' in df2.columns:
+        #df2['volume']   = data['volume'].resample(period,closed="right",label="right").sum().round(decimals=1)  
+        del df2['volume']
+    if 'amount' in df2.columns:
+        df2['amount']   = data['amount'].resample(period,closed="right",label="right").sum().round(decimals=1)
     if 'change' in df2.columns:
         df2['change']   = data['change'].resample(period,closed="right",label="right").sum().round(decimals=2)  
-    if 'change1' in df2.columns:
-        df2['change1']  = data['change1'].resample(period,closed="right",label="right").sum().round(decimals=2)      
-    df2                 = df2[~df2['volume'].isin([0])]
+    if 'chgTol' in df2.columns:
+        df2['chgTol']   = data['chgTol'].resample(period,closed="right",label="right").sum().round(decimals=2)
     df2['grow']         = ((df2['close']  / df2['close'].shift(1) - 1) * 100).round(decimals=2)
-    del df2['open']
     df2.reset_index(inplace=True)
     procTurtleData(df2, maList[-1])
+    return df2
+def getMergMinute(otype, data) :
+    period              = otype
+    data['date']        = pd.to_datetime(data['date']) #把字符串转换成时间信息    
+    data                = data.set_index('date')
+    df2                 = data.resample(period,closed="right",label="right").last()
+    df2                 = df2[~df2['amount'].isin([0])]
+    df2                 = df2.dropna()
+    if 'high' in df2.columns:
+        df2['high']     = data['high'].resample  (period,closed="right",label="right").max().round(decimals=2)
+    if 'low' in df2.columns:
+        df2['low']      = data['low'].resample   (period,closed="right",label="right").min().round(decimals=2) 
+    df2['close']        = data['close' ].resample(period,closed="right",label="right").last().round(decimals=2)    
+    if 'volume' in df2.columns:
+        df2['volume']   = data['volume'].resample(period,closed="right",label="right").sum().round(decimals=1)  
+    if 'amount' in df2.columns: del df2['amount']
+    df2.reset_index(inplace=True)
     return df2
 ############################# macd区间 ##########################
 def findMacdCross(code, name, testFlag, df, otype):
     procMacdData(df)
-    sta             = list(df.cross.where(df.cross ==  1).dropna().index)
+    sta             = list(df.cross.where(df.cross == 1).dropna().index)
     if len(sta) == 0 : return [0, 0, 0]
     P0              = sta[-1]
     adj             = df.cross.iloc[P0:].where(df.cross == -1).dropna().index
@@ -207,37 +211,43 @@ def findMacdCross(code, name, testFlag, df, otype):
     if testFlag :
         print("findMacdCross", code, name, [P0, P1, P2])
     return [P0, P1, P2]
+def findDaysPoke(code, name, testFlag, df, wins):
+    halfwins        = wins//2 + 1
+    df['poke']      = df.delta.rolling(wins, center=True).min()
+    df.poke.iloc[-halfwins:] = df.delta.tail(halfwins).min()
+    df['poke']      = [1 if a == b and c < 0 and d < 0 else 0 for a,b,c,d in zip(df.delta, df.poke, df.dif, df.dea)]
+    df['adj']       = [-1 if a == -1 and b > 0 and c > 0 else 0 for a,b,c in zip(df.cross, df.dif, df.dea)]
 ############################# 日线/周线放量区间 ##########################
-def findVolCross2(code, name, testFlag, df, wins, otype) :
-    # [vol > 5/10, vol < 5/10] ：找出放量到缩量的区间范围
-    df['s5']        = df.vol5.shift(1)
-    df['s10']       = df.vol10.shift(1)
-    df['sta']       = [ 1 if a >= b and c < d else 0 for a,b,c,d in zip(df.vol5, df.vol10, df.s5, df.s10)]
-    df['end']       = [-1 if a < b and c >= d else 0 for a,b,c,d in zip(df.vol5, df.vol10, df.s5, df.s10)]
-    df['big']       = [1 if a > max(b, c) else 0 for a,b,c in zip(df.volume, df.vol5, df.vol10)]
-    sta             = list(df.sta.where(df.sta ==  1).dropna().index)
-    end             = list(df.end.where(df.end == -1).dropna().index)
-    del df['s5'], df['s10'], df['sta'], df['end']
-    #print(code, name, sta, end, df.index[-1])
-    if len(sta) == 0 : return [0, 0, 0]
-    if len(end) == 0 or end[-1] < sta[-1] : end.append(df.index[-1])
-    if end[0] < sta[0] : end.pop(0)
-    if (len(sta) != len(end)) :
-        print(sta, '\n', end)
-        print(code, name, len(sta), len(end))
-        sys.exit(0)
-
-    # 找出最近放量区间
-    scope           = 7 if otype == "days" else 7
-    lens            = df.index[-1]
-    for i in range(len(sta)-1, 0, -1) :
-        P0          = sta[i]
-        P1          = end[i]
-        P2          = df.big.iloc[P0:P1].sum()
-        if P2 >= scope : return [P0, P1, P2]
-        if lens - P0 >= wins : return [0, 0, 0]
-    return [0, 0, 0]
-############################# 日线/周线放量区间 ##########################
+def findMacdCtniu(code, name, testFlag, df, wins, otype) :
+    df['abc']       = abs(df.delta)
+    hdiff           = np.diff(np.sign(np.diff(df.abc)))
+    hpeak           = (np.where(hdiff == -2)[0] + 1).tolist()
+    hpoke           = (np.where(hdiff ==  2)[0] + 1).tolist()
+    df['pk']        = 0
+    for i in hpoke : df.pk.iloc[i] = 1
+    #df['mdlt']      = df.abc.rolling(wins, center=False).min()
+    #df['pk']        = [1 if (a and b == c) else 0 for a,b,c in zip(df.pk, df.abc, df.mdlt)]
+    
+    sta             = list(df.cross.where(df.cross == 1).dropna().index)
+    if len(sta) == 0 : return [0, 0]
+    P0              = sta[-1]
+    
+    ctn             = list(df.pk.where(df.pk == 1).dropna().index)
+    if len(ctn) == 0 : return [0, 0]
+    if ctn[-1] < P0  : return [0, 0]
+    P1              = ctn[-1]
+    
+    if df.dif.iloc[P1] < 0 : return [0, 0]
+    if df.dif.iloc[P1] < df.dea.iloc[P1] : return [0, 0]
+    del df['abc'], df['pk']
+    return [P0, P1]
+def findDifPoke(code, name, testFlag, df) :
+    df['abc']       = abs(df.delta)
+    hdiff           = np.diff(np.sign(np.diff(df.abc)))
+    hpeak           = (np.where(hdiff == -2)[0] + 1).tolist()
+    hpoke           = (np.where(hdiff ==  2)[0] + 1).tolist()
+    del df['abc']
+    return hpoke[-1] if len(hpoke) else 0
 def findVolCross1(code, name, testFlag, df, wins, otype) :
     df['big']       = [1 if a > max(b, c) else 0 for a,b,c in zip(df.volume, df.vol5, df.vol10)]
     df['cntc']      = df.big.rolling(wins, center=False).sum()
@@ -249,192 +259,198 @@ def findVolCross1(code, name, testFlag, df, wins, otype) :
     del df['big'], df['cntc']
     return [P1, P2]
 ############################# 日线大阳后连涨或回调破新高 #######################
-def findSealGrow(code, name, testFlag, df, hf, tolAmount, qos):
-    info                = ""
-    if df.grow.iloc[-1] < 0 : return ""
-        
-    P0, P1, P2          = findMacdCross(code, name, testFlag, df, "days")
-    if df.dif.iloc[-1]  < df.dea.iloc[-1] : return ""
-    if df.dea.iloc[-1]  < 0 : return ""
-
-    wk                  = getMergData("week", df)
-    P0, P1, P2          = findMacdCross(code, name, testFlag, df, "week")
-    if wk.dif.iloc[-1]  < wk.dea.iloc[-1] : return ""
-    if wk.dif.iloc[-1]  < 0 : return ""
+def findSealGrow(code, name, testFlag, wk, df, qos):
+    info            = ""
+    wins            = maList[-1]
+    if 'seal' not in df.columns : df['seal'] = [ 1 if a >= 9.7 else 0 for a in df.grow]
+    slist           = list(df.seal.tail(wins).where(df.seal == 1).dropna().index)
+    if len(slist) == 0 : return ""
     
-    df['seal']          = [ 2 if a >= 19.7 else 1 if a >= 9.7 else 0 for a in df.grow]
-    change              = df['change'].iloc[-1]
-    amount              = df['amount'].iloc[-1]
-    close               = wk['close'].tolist()
-    minval              = wk.close.tail(20).min()
-    grow                = round(close[-1] / minval, 2)
-    sealcnt             = df.seal.tail(5).sum()
-    waterlvl            = 3 if tolAmount < 50 else 5
-    info                = str(qos) + " " + str(change).rjust(5) + "%"
-    if grow >= 1.7  : return ""
-    if sealcnt >= 4 : return ""   # 连续4板高危
-    if amount < waterlvl : return ""
-
+    change          = df['change'].iloc[-1]
+    amount          = df['amount'].iloc[-1]
+    close           = df['close'].tolist()
+    P0              = slist[0]
+    gaps            = df.index[-1] - P0
+    hgap            = (gaps + 1) * 8
+    qgap            = (gaps + 1) * 16
+    grow            = round(close[-1] / min(close[-120 :]), 2)
+    if grow > 1.8 : return ""
+    if amount < topAmount : return ""
+    if change < dayChange : return ""
+    if df.grow.iloc[-1] < -5 : return ""
+    
+    hf              = getMinuteData(code, name, '30min')
+    procMacdData(hf)
+    if hf.dif.iloc[-1] < 0 and hf.dea.iloc[-1] < 0 : return ""
+    if hf.dif.iloc[-1] < 0 : return ""
+    if hf.dif.iloc[-1] < hf.dea.iloc[-1] :
+        if hf.delta.iloc[-1] < hf.delta.iloc[-2] : return ""
+    
+    qt              = getMinuteData(code, name, '15min')
+    procMacdData(qt)
+    findDaysPoke(code, name, testFlag, qt, wins)
+    if qt.dif.iloc[-1] < 0 and qt.dea.iloc[-1] < 0 : return ""
+    
+    #mxvol           = hf.volume.tail(hgap).idxmax()
+    #if hf.close.iloc[-1] < hf.close.iloc[mxvol] * 0.98 : return ""
+    
+    findDaysPoke(code, name, testFlag, hf, wins)
+    adj             = list(hf.adj.tail(hgap).where(hf.adj == -1).dropna().index)
+    if len(adj) > 0 :
+        info        = str(qos) + "8 " + str(change).rjust(5) + "%"
+        if hf.dea.iloc[-1] < 0 : return ""
+        if hf.dif.iloc[-1] < hf.dea.iloc[-1] :
+            info    = str(qos) + "9 " + str(change).rjust(5) + "%"
+            mxcls   = hf.close.tail(hgap).max()
+            if hf.close.iloc[-1] < mxcls * 0.97 : return ""
+    else :
+        info        = str(qos) + "7 " + str(change).rjust(5) + "%"
+        adj         = list(qt.adj.tail(qgap).where(qt.adj == -1).dropna().index)
+        if len(adj) == 0 : return ""
+        if len(adj) == 1 and qt.index[-1] - adj[-1] <= 8 : return ""
+        if qt.dif.iloc[-1] < qt.dea.iloc[-1] :
+            mxcls   = qt.close.tail(qgap).max()
+            if qt.close.iloc[-1] < mxcls * 0.98 : return ""
+            #print(code, name, len(adj))
+            #if qt.dif.iloc[-1] != qt.dif.iloc[point:].min() : 
+            #    if qt.close.iloc[-1] != qt.close.iloc[adj[-1]:].min() : return ""
+    
     if True \
     and True :
-        result          = [True, code, name.rjust(4), minval, str(amount)+"亿", close[-1], grow, sealcnt, info]
+        result          = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], grow, gaps, info]
         return result 
     return ""
 ############################# 日线放量后连涨或回调破新高 #######################
-def findDaysDif(code, name, testFlag, df, wk, qos):
+def findDaysGrow(code, name, testFlag, wk, df, qos):
     info            = ""
-    P0, P1, P2      = findMacdCross(code, name, testFlag, df, "days")
-    if P0 == 0 : return ""
-    
+    wins            = maList[-1]
+    findDaysPoke(code, name, testFlag, df, wins)
+    bot             = list(df.poke.where(df.poke == 1).dropna().index)
+    adj             = list(df.adj. where(df.adj == -1).dropna().index)
+    if df.grow.iloc[-1] < -5 : return ""
+    if df.dif.iloc[-1] < 0 and df.dea.iloc[-1] < 0 : return ""
+    if df.dif.iloc[-1] < -0.1 : return ""
+    if df.dea.iloc[-1] < -0.1 : return ""
+    if df.dif.iloc[-1] < df.dea.iloc[-1] and df.delta.iloc[-1] < df.delta.iloc[-2] : return ""
+    if len(bot) == 0 : 
+        print(code, name)
+        return ""
+
+    B0              = bot[-1]
+    B1              = 0 if len(bot) == 1 else bot[-2]
+    A0              = 0 if len(adj) == 0 else adj[-1]
     close           = df['close'].tolist()
     change          = df['change'].iloc[-1]
     amount          = df['amount'].iloc[-1]
-    gaps            = df.index[-1] - P0
-    #if df.seal.iloc[P0:].sum() == 0 : return ""
-    if not (amount >= dayAmount and change >= dayChange) : return ""
-    if df.delta.iloc[-1] < df.delta.iloc[-2] : return ""
-    if df.delta.iloc[-2] < df.delta.iloc[-3] : return ""
-    grow            = round(wk.close.iloc[-1] / wk.close.tail(20).min(), 2)
-    
-    # days dif cross dea, week调整结束，days/week共振
-    if (P1 + P2 == 0) :
-        info        = str(qos) + "8.W  " + str(change).rjust(5) + "%"
-    # days dif cross dea, dif未拉回0轴，微调后破新高
-    elif (P1 > 0 and P2 == 0) :
-        if df.tur.iloc[-1] == 0 : return ""
-        info        = str(qos) + "8.D  " + str(change).rjust(5) + "%"
-    # days dif cross dea, 调整拉回0轴又破新高
-    elif (P1 > 0 and P2 > 0) :
-        gaps        = df.index[-1] - P2 if P2 else gaps
-        info        = str(qos) + "7.W  " + str(change).rjust(5) + "%"
-        if wk.tur.iloc[-1] == 0 : return ""
+    gaps            = df.index[-1] - B0
+    hgap            = (gaps + 1) * 8
+    grow            = round(close[-1] / min(close[-120 :]), 2)
+    if df.grow.tail(gaps).where(df.grow > 7).dropna().count() == 0 : return ""
+    if not (amount >= dayAmount * 0.9 and change >= dayChange) : return ""
+    if change >= 50 : return ""
+    if grow > growLevel : return ""
+    if df.seal.iloc[-1] : return ""
+    # bot --> adjust start --> tur
+    if A0 > B0 :
+        mxcls       = df.close.iloc[B0 : A0].max()
+        # dif > dea
+        if df.dif.iloc[-1] > df.dea.iloc[-1] :
+            info    = str(qos) + "9  " + str(change).rjust(5) + "%"
+            if close[-1] < mxcls : return ""
+        # dif <= dea and nearby 0轴
+        else :
+            info    = str(qos) + "8  " + str(change).rjust(5) + "%"
+            if close[-1] < mxcls * 0.98 : return "" 
+    # bot --> adjust few days --> continue grow
     else :
-        info        = str(qos) + "7.D  " + str(change).rjust(5) + "%"
-    if info == "" : return ""
-    if testFlag:
-        print(code, name, P0, P1, P2, info)
+        info        = str(qos) + "7  " + str(change).rjust(5) + "%"
+        mxcls       = df.close.iloc[B1 : B0].max()
+        if close[-1] < mxcls : return ""
+        mxcls       = df.close.iloc[B0 : ].max()
+        if close[-1] < mxcls * 0.98 : return "" 
 
-    if True \
-    and grow < growLevel \
-    and True :
-        result          = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], grow, gaps, info]
-        return result 
-    return ""
-############################# 周线放量后连涨或回调破新高 #######################
-def findWeekDif(code, name, testFlag, df, wk, qos):
-    info            = ""
-    P0, P1, P2      = findMacdCross(code, name, testFlag, wk, "days")
-    if P0 == 0 : return ""
+    if 1 :
+        hf          = getMinuteData(code, name, '30min')
+        procMacdData(hf)
+        if hf.dif.iloc[-1] < 0 and hf.dea.iloc[-1] < 0 : return ""
+        if hf.dif.iloc[-1] < 0 : return ""
+        
+        qt          = getMinuteData(code, name, '15min')
+        procMacdData(qt)
+        if qt.dif.iloc[-1] < 0 and qt.dea.iloc[-1] < 0 : return ""
+        
+        #if hf.dif.iloc[-1] < hf.dea.iloc[-1] :
+        #    findDaysPoke(code, name, testFlag, hf, wins)
+        #    hfadj   = list(hf.adj. where(hf.adj == -1).dropna().index)
+        #    if len(hfadj) > 0 :
+        #        mxcls   = hf.close.iloc[-hgap:hfadj[-1]].max()
+        #        if hf.close.iloc[-1] < mxcls * 0.97 : return ""
+            
+        #if hf.dif.iloc[-1] < 0 : return ""
+        #if hf.dif.iloc[-1] < hf.dea.iloc[-1] and hf.delta.iloc[-1] < hf.delta.iloc[-2] : return ""
+        #if hf.dif.iloc[-1] < hf.dea.iloc[-1] :
+        #    findDaysPoke(code, name, testFlag, hf, wins)
+        #    hfadj   = list(hf.adj. where(hf.adj == -1).dropna().index)
+        #    if hf.delta.iloc[-1] == hf.delta.iloc[hfadj[-1] : ].min() : return ""
     
-    close           = wk['close'].tolist()
+    if info == "" : return ""
+    if True \
+    and True :
+        result          = [True, code, name.rjust(4), close[B0], str(amount)+"亿", close[-1], grow, gaps, info]
+        return result 
+    return ""       
+    print(code, name, info)
+    sys.exit(0)
+############################# 日线放量后连涨或回调破新高 #######################
+def findHalfGrow(code, name, testFlag, wk, df, qos):
+    info            = ""
+    wins            = maList[-1]
+    halfwins        = wins//2
+    df['sta']       = df.dif.rolling(wins, center=True).min()
+    df.sta.iloc[-halfwins:] = df.dif.tail(halfwins).min()
+    df['sta']       = [1 if a == b else 0 for a,b in zip(df.dif, df.sta)]
+    sta             = list(df.sta.where(df.sta == 1).dropna().index)
+    if df.seal.iloc[-1] : return ""
+    if df.dif.iloc[-1] < -0.1 : return ""
+    if df.dea.iloc[-1] < -0.1 : return ""
+    if df.dif.iloc[-1] < df.dea.iloc[-1] : return ""
+    if len(sta) == 0 : 
+        print(code, name)
+        return ""
+
+    close           = df['close'].tolist()
     change          = df['change'].iloc[-1]
     amount          = df['amount'].iloc[-1]
-    gaps            = wk.index[-1] - P0
-    grow            = round(close[-1] / wk.close.tail(max(gaps,20)).min(), 2)
-    if df.delta.iloc[-1] < df.delta.iloc[-2] : return ""
-    if df.delta.iloc[-2] < df.delta.iloc[-3] : return ""
-    if wk.delta.iloc[-1] < wk.delta.iloc[-2] : return ""
-    if not (amount >= dayAmount and change >= dayChange) : return ""
+    grow            = round(close[-1] / df.close.tail(120).min(), 2)
     if grow > growLevel : return ""
-    if testFlag :
-        print(code, name, P0, P1, P2)
+    P0              = sta[-1]
+    gaps            = df.index[-1] - P0
+    
+    hf              = getMinuteData(code, name, '30min')
+    procMacdData(hf)
+    if hf.dif.iloc[-1] < 0 and hf.dea.iloc[-1] < 0 : return ""
+    if hf.dif.iloc[-1] < 0 : return ""
+    if hf.dif.iloc[-1] < hf.dea.iloc[-1] :
+        if hf.delta.iloc[-1] < hf.delta.iloc[-2] : return ""
+    
+    qt              = getMinuteData(code, name, '15min')
+    procMacdData(qt)
+    if qt.dif.iloc[-1] < 0 and qt.dea.iloc[-1] < 0 : return ""    
 
-    if  P2 > 0 :
-        if P2 < P1 : return ""
-        gaps        = wk.index[-1] - P2
-        info        = str(qos) + "W  " + str(change).rjust(5) + "%"
-    else :
-        info        = str(qos) + "M  " + str(change).rjust(5) + "%"
-        mth         = getMergData("month", df)
-        procMacdData(mth)
-        if mth.delta.iloc[-1] < mth.delta.iloc[-2] : return ""
-        if mth.dif.iloc[-1] < mth.dea.iloc[-1] : return "" 
-        if mth.dif.iloc[-1] < 0 : return "" 
-        
+    findDaysPoke(code, name, testFlag, hf, wins)
+    hfgaps          = (gaps + 1) * 8
+    hfadj           = list(hf.adj.tail(hfgaps).where(hf.adj == -1).dropna().index)
+    info            = str(qos) + "9  " + str(change).rjust(5) + "%"
+    #if len(hfadj) == 0 : return ""
+    #if len(hfadj) >  2 : return ""
+    #if hf.dif.iloc[-1] < hf.dea.iloc[-1] : 
+    #    if hf.dif.iloc[-1] < hf.dea.iloc[-2] : return ""
+    #    if hf.dif.iloc[-2] < hf.dea.iloc[-3] : return ""
+    if not (amount >= dayAmount * 0.9 and change >= dayChange) : return ""
+
     if True \
     and True :
         result          = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], grow, gaps, info]
-        return result 
-    return ""
-############################# 周线天量后新高或回调破新高 #######################
-def findWeekVol2(code, name, testFlag, wk, df, qos):
-    # 周线天量 ：
-    # 1）量价齐升,一波冲顶；（边拉边洗）
-    # 2）量能放大,股价不涨, 2/3周后回落调整,再创新高（吸筹洗盘）
-    info                = ""
-    change              = df['change'].iloc[-1]
-    amount              = df['amount'].iloc[-1]
-    delta               = 25
-    point               = wk.change1.tail(weekOfYear).idxmax() # 使用wk换手率
-    gaps                = wk.index[-1] - point
-    high                = wk.close.iloc[point-3:point+3].max()
-    if gaps > delta : return "" 
-    if wk.close.iloc[-1] < high * 0.95 : return ""
-    if wk.dif.iloc[-1] < -0.1 : return ""
-    
-    minval              = wk.close.tail(max(gaps, delta)).min()
-    close               = wk['close'].tolist()
-    grow                = round(close[-1] / minval, 2)
-    if testFlag :
-        print(code, name, gaps, wk.close.iloc[-1], wk.close.iloc[point])
-        
-    if True \
-    and grow < growLevel \
-    and (amount >= dayAmount and change >= dayChange) \
-    and True :
-        info            = str(qos) + "  " + str(change).rjust(5) + "%"
-        result          = [True, code, name.rjust(4), minval, str(amount)+"亿", close[-1], grow, gaps, info]
-        return result 
-    return ""
-############################# 周线连续放量 #######################
-def findWeekVol1(code, name, testFlag, wk, df, qos):
-    info                = ""
-    P1, P2              = findVolCross1(code, name, testFlag, wk, 10, "week")
-    if P1 == 0 : return ""
-    
-    change              = df['change'].iloc[-1]
-    amount              = df['amount'].iloc[-1]
-    close               = wk['close'].tolist()
-    gaps                = wk.index[-1] - P1
-    minval              = wk.close.tail(max(gaps, 30)).min()
-    grow                = round(close[-1] / minval, 2)
-    if gaps >= 15 : return ""
-    if wk.dif.iloc[-1] < -0.1 : return ""
-    if testFlag :
-        print(code, name, P1, P2, wk.index[-1], gaps, grow)
-        print(wk.tail(30))
-        
-    if True \
-    and grow < growLevel \
-    and (amount >= dayAmount and change >= dayChange) \
-    and True :
-        info            = str(qos) + "  " + str(change).rjust(5) + "%"
-        result          = [True, code, name.rjust(4), minval, str(amount)+"亿", close[-1], grow, gaps, info]
-        return result 
-    return ""
-def findDaysVol1(code, name, testFlag, wk, df, qos):
-    info                = ""
-    P1, P2              = findVolCross1(code, name, testFlag, df, 10, "days")
-    if P1 == 0 : return ""
-    
-    change              = df['change'].iloc[-1]
-    amount              = df['amount'].iloc[-1]
-    close               = wk['close'].tolist()
-    gaps                = df.index[-1] - P1
-    minval              = df.close.tail(max(gaps, 120)).min()
-    grow                = round(close[-1] / minval, 2)
-    if gaps >= 15 : return ""
-    if df.dif.iloc[-1] < 0 : return ""
-    if testFlag :
-        print(code, name, P1, P2, df.index[-1], gaps, grow)
-        print(df.tail(30))
-        
-    if True \
-    and grow < growLevel \
-    and (amount >= dayAmount and change >= dayChange) \
-    and True :
-        info            = str(qos) + "  " + str(change).rjust(5) + "%"
-        result          = [True, code, name.rjust(4), minval, str(amount)+"亿", close[-1], grow, gaps, info]
         return result 
     return ""
 ######################################################################
@@ -539,8 +555,26 @@ def findPlateWeekMacd(code, name, testFlag, df, wk, qos) :
 ######################################################################
 def strClose(close):
     return str(close).rjust(6)
+def getMinuteData(code, name, tp) :
+    loca            = "SH" if code[0] == "6" else "SZ" 
+    ifile           = minipath + loca + code
+    if not os.path.exists(ifile) : 
+        print(ifile, "not find")
+        sys.exit(0)
+    # 删除前两行和最后一行无效内容
+    data            = pd.read_csv(ifile,encoding='gbk',header=2)
+    data.columns    = ['date','time','open','high','low','close','volume','amount']
+    data            = data.iloc[:-1]
+    data['time']    = [str(a).rjust(6, '0').replace('.', ':') for a in data.time]
+    data['time']    = [a[0:2]+':'+a[2:] for a in data.time]
+    data['date']    = [a + " " + b for a, b in zip(data.date, data.time)]
+    data['time']    = [datetime.datetime.strptime(str(a), '%Y-%m-%d %H:%M:%S') for a in data.date]
+    del data['time'], data['open']
+    df              = getMergMinute(tp, data)
+    return df
 def readDataFromFile(code, name, path):
     if not os.path.exists(path) :
+        #print(code, name, path)
         return empty
     data                    = pd.read_csv(path, parse_dates=[0])
     data.sort_values('date', ascending=True, inplace=True)
@@ -570,7 +604,7 @@ def procMacdData(df) :
     df['delta']             = df.dif - df.dea
     df['cross']             = [1 if (a<b and c>=d) else -1 if (a>=b and c<d) else 0 \
                               for a,b,c,d in zip(df.sdif, df.sdea, df.dif, df.dea)]
-    df['cross']             = [2 if (a==1 and b>=-0.1) else 1 if(a==1 and b<0) else a \
+    df['cross']             = [2 if (a==1 and b>=0) else 1 if(a==1 and b<0) else a \
                               for a,b in zip(df.cross, df.dif)]
     #del df['dea']
     del df['sdif'], df['sdea']

@@ -31,7 +31,7 @@ basepath                = "C:\\new_tdx\\T0001\\export\\"            #基础原�
 dayspath                = workpath + "DaysPath\\"                   #日线输出
 halfpath                = workpath + "HalfPath\\"                   #half输出
 rsltpath                = workpath + "RsltPath\\"                   #统计结果
-drawType                = []                                        #半小时/日线/周线
+drawType                = ['days']                                  #半小时/日线/周线
 codeList                = []
 codeName                = []
 baseInfo                = pd.DataFrame()
@@ -120,8 +120,9 @@ def setUpdateDaysEn(flag):
     global drawType
     drawType.append('days')
 ############################# 处理天/周/月线数据 ####################
-def getPlatImage(endDate, testFlag, testList):
+def getPlatImage(endDate, testList):
     global rsltpath, plateList, plateName
+    testFlag            = True if testList else False
     if not testFlag:
         iputList        = [[a, b] for a, b in zip(plateList, plateName)]
     else:
@@ -168,7 +169,6 @@ def getPlatImage(endDate, testFlag, testList):
         del df['flag']
         df.sort_values('info', ascending=False, inplace=True)
         print(df)
-        
 def procInitStockData(endDate) :   
     global codeList, codeName
     output                      = rsltpath + endDate
@@ -214,7 +214,7 @@ def getChangeRate(name, data) :     # 计算换手率
     data['change']      = (data['amount'] / float(volume) * 100).round(decimals=2)
     #data['change']      = baseInfo['换手Z'][idx]
     volume              = baseInfo['流通股(亿)'][idx]
-    data['change1']     = (data['volume'] / float(volume)).round(decimals=2)
+    data['chgTol']      = (data['volume'] / float(volume)).round(decimals=2)
     return data
 def getUpdateMap(endDate, code, name, tp) :
     if tp == 'half':
@@ -286,8 +286,9 @@ def getMergData(code, name, endDate, otype, data, ofile) :
 ######################################################################
 ############################# 处理自选股票 ############################
 ######################################################################
-def getStockImage(endDate, testFlag, testCode):
+def getStockImage(endDate, testCode):
     global codeList, codeName, baseInfo, baseFile
+    testFlag                    = True if testCode else False
     output                      = rsltpath + endDate
     if not os.path.exists(output) :
         print("%s :: line %3d : ############### merge data before process\n"\
