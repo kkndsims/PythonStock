@@ -11,7 +11,7 @@ testList                = []
     
 if __name__ == '__main__' :
     endDate             = getWorkDay(datetime.datetime.now())
-    #endDate             = '20240607'
+    #endDate             = '20240731'
     #sys.exit(0)
     
     if enHalf : setUpdateHalfEn(enHalf)     #使能处理half数据
@@ -23,7 +23,7 @@ if __name__ == '__main__' :
     if enPlat : getPlatImage(endDate, testList)     #板块买点
 
     #testList            = ['SH605336']     #上证
-    #testList            = ['SZ301306']     #深证
+    #testList            = ['SZ300927']     #深证
     getStockImage(endDate, testList)        #个股买点
       
     sendFlag            = True
