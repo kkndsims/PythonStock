@@ -74,14 +74,16 @@ def getStockBuy(code, name, endDate, baseInfo, testFlag, hfile, dfile, info):
     if flag == False : return flag, code, name
 
     if findEnab and 1 : 
-        result      = findRighSideGrow0(code[2:], name, testFlag, days, half, "8D.")
+        result      = findSealGrow(code[2:], name, testFlag, days, half, "9S.")
         if result: return result    # 日线右侧交易
-        result      = findRighSideGrow2(code[2:], name, testFlag, days, "7W.")
-        if result: return result    # 日线右侧交易
-        
+        result      = findRighSideGrow3(code[2:], name, testFlag, days, '30min', "8H.")
+        if result: return result    # 30min右侧交易
+        result      = findRighSideGrow3(code[2:], name, testFlag, days, '15min', "7Q.")
+        if result: return result    # 15min右侧交易
+
     if findEnab and 0 : # 额外选择
-        #result      = findRighSideGrow2(code[2:], name, testFlag, days, "5.")
-        #if result: return result   # week/month右侧交易
+        result      = findRighSideGrow2(code[2:], name, testFlag, days, "7W.")
+        if result: return result    # week/month右侧交易
         result      = findRighSideGrow5(code[2:], name, testFlag, days, "6H.")
         if result: return result   # half右侧交易
         
@@ -127,7 +129,19 @@ def washHalfData(code, name, days, info):
     hf          = getMinuteData(code, name, '30min')
     procMacdData(hf)
     if hf.dea.iloc[-1] < 0 and hf.dif.iloc[-1] < hf.dea.iloc[-1]: return False, hf
+    for ma in maList:
+        hf['cls'+str(ma)] = hf.close.rolling(ma).mean().round(decimals=2)
+    if hf.close.iloc[-1] < hf['cls10'].iloc[-1]: return False, hf
+    for ma in maList: del hf['cls'+str(ma)]
     return True, hf
+def washQartData(code, name, days, info):
+    qt          = getMinuteData(code, name, '15min')
+    procMacdData(qt)
+    for ma in maList:
+        qt['cls'+str(ma)] = qt.close.rolling(ma).mean().round(decimals=2)
+    if qt.close.iloc[-1] < qt['cls10'].iloc[-1]: return False, qt
+    for ma in maList: del qt['cls'+str(ma)]
+    return True, qt
 def washWeekData(code, name, days):
     week        = getMergData("week", days)
     procMacdData(week)
@@ -261,26 +275,24 @@ def washAmount(code, name, testFlag, df):
     if testFlag : print(sys._getframe().f_lineno, code, name, flag0, flag1, flag2)
     if flag0 or flag1 or flag2 : return True
     return False
-def washHalf(code, name, testFlag, df):
-    hf          = getMinuteData(code, name, '30min')
-    procMacdData(hf)
-    adj         = list(hf.cross.where(hf.cross == -1).dropna().index)
+def findHalf(code, name, testFlag, hf, hgap):
+    adj         = list(hf.cross.tail(hgap).where(hf.cross == -1).dropna().index)
     if len(adj) == 0 : return False
     peak        = [hf.close.iloc[i] for i in adj]
-    top         = max(peak[-7:])
+    top         = max(peak)
     P0          = adj[peak.index(top)]
-    if hf.index[-1] - P0 < 5 : return False
-    
-    hmin        = hf.dif.iloc[P0:].min()
-    #print(code, name, adj, peak, top)
-    #print(P0, hmin, top, hf.index[-1])
-    flag0       = 1 if hf.close.iloc[-1] >= hf.close.iloc[P0-1] else 0
-    flag1       = 1 if (hmin >= -0.03 \
-                  and hf.dif.iloc[-1] != hmin \
-                  and hf.dif.iloc[-1] > hf.dif.iloc[-2] \
-                  and hf.dif.iloc[-2] > hf.dif.iloc[-3]) else 0
-    if testFlag : print(sys._getframe().f_lineno, code, name, flag0, flag1)
-    if flag0 or flag1 : return True
+    mdea        = hf.dea.iloc[P0:].min()
+    mcls        = hf.close.iloc[P0:].min()
+    gaps        = hf.index[-1] - P0
+    flag1       = hf.dea.iloc[-1] > mdea
+    flag2       = hf.close.iloc[-1] > mcls
+    flag3       = hf.close.iloc[-1] > hf.close.iloc[P0]
+    fsum        = flag1 and flag2 and flag3
+    if testFlag :
+        print(code, name, P0, hf.index[-1])
+        print(sys._getframe().f_lineno, code, name, flag1, flag2, flag3, fsum)
+    if gaps <= 5 : return False
+    if fsum : return True
     return False
 def washLongGrow(code, name, testFlag, df, isweek):
     wk          = getMergData("week", df) if isweek else getMergData("M", df)
@@ -328,26 +340,56 @@ def washLongGrow(code, name, testFlag, df, isweek):
     if cnt >= 20 and rate >= 0.85 : return True, gaps, "7"
     return False, 0, 0
 ############################# 涨停调整 ################################
-def findSealGrow(code, name, testFlag, wk, df, qos):
+def findSealGrow(code, name, testFlag, df, hf, qos):
     info        = ""
     wins        = maList[-1]
-    if 'seal' not in df.columns : df['seal'] = [1 if a >= 9.7 else 0 for a in df.grow]
-    slist       = list(df.seal.tail(wins).where(df.seal == 1).dropna().index)
-    if len(slist) == 0 : return ""
-
     change      = df['change'].iloc[-1]
     amount      = df['amount'].iloc[-1]
     close       = df['close'].tolist()
-    P0          = slist[0]
+    flag1       = amount >= topAmount and change >= dayChange
+    grow        = round(close[-1] / min(close[-120:]), 2)
+    if df.dif.iloc[-1] < 0 : return ""
+    if grow > 2 : return ""
+    if flag1 == 0 : return ""
+    if 'seal' not in df.columns : df['seal'] = [1 if a >= 9.7 else 0 for a in df.grow]
+    df.seal.iloc[-1] = 0
+    slist       = list(df.seal.tail(wins).where(df.seal == 1).dropna().index)
+    if len(slist) == 0 : return ""
+
+    P0          = slist[-1]
     gaps        = df.index[-1] - P0
     hgap        = (gaps + 1) * 8
-    grow        = round(close[-1] / min(close[-120:]), 2)
-    flag        = washHalfData(code, name, testFlag, df, hgap)
-    info        = str(qos) + "9 " + str(change).rjust(5) + "%"
-    if flag == False : return ""
-    if grow > 1.8 : return ""
-    if df.dif.iloc[-1] < 0 : return ""
-    if amount < dayAmount * 0.8 : return ""
+    if close[-1] < close[P0] * 0.98 : return ""
+    adj         = list(hf.cross.tail(hgap).where(hf.cross == -1).dropna().index)
+    if len(adj) == 0 :
+        info    = str(qos) + "9 " + str(change).rjust(5) + "%"
+        flag, qt= washQartData(code, name, df, info)
+        if flag == False : return flag, code, name
+        adj     = list(qt.cross.tail(hgap*2).where(qt.cross == -1).dropna().index)
+        if len(adj) == 1 :
+            info    = str(qos) + "8 " + str(change).rjust(5) + "%"
+            P1      = adj[0]
+            mcls    = qt.close.iloc[P1:].min()
+            if qt.close.iloc[-1] == mcls : return ""
+            if qt.close.iloc[-1] < qt.close.iloc[P1-1] : return ""
+        else:
+            print(code, name, len(adj))
+    else :
+        info    = str(qos) + "7 " + str(change).rjust(5) + "%"
+        P1      = adj[0]
+        mdea    = hf.dea.iloc[P1:].min()
+        idea    = hf.dea.iloc[P1:].idxmin()
+        mcls    = hf.close.iloc[P1:].min()
+        if hf.index[-1] == idea : return ""
+        if hf.close.iloc[-1] == mcls : return ""
+        if hf.close.iloc[-1] < hf.close.iloc[P1-1] : return ""
+        if mdea < 0 :
+            info    = str(qos) + "6 " + str(change).rjust(5) + "%"
+            peak    = hf.close.iloc[P1:adj[-1]].max()
+            if hf.close.iloc[-1] < peak * 0.98 : return ""
+            
+    if testFlag : print(code, name, slist, df.index[-1], gaps, hgap, adj)
+    if info == "" : return ''
     if True :
         result  = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], grow, gaps, info]
         return result
@@ -439,47 +481,43 @@ def findRighSideGrow2(code, name, testFlag, df, qos):
         if flag == True : 
             info    = str(qos) + str(tp) + "M " + str(change).rjust(5) + "%"
     if info == "" : return ""
-    if grow > 2.5 : return ""
+    if grow >= 2 : return ""
     if True:
         result  = [True, code, name.rjust(4), close[P0], str(amount)+"亿", close[-1], grow, P0, info]
         return result
     return ""
 ######################################################################
-def findRighSideGrow3(code, name, testFlag, df, qos):
+def findRighSideGrow3(code, name, testFlag, df, tp, qos):
     info        = ""
     close       = df['close'].tolist()
     change      = df['change'].iloc[-1]
     amount      = df['amount'].iloc[-1]
+    grow        = round(close[-1] / df.close.iloc[-120:].min(), 2)
     if df.dif.iloc[-1] < 0 : return ""
-    if df.grow.tail(10).max() < 7 : return ""
+    if change < dayChange : return ""
+    if df.grow.tail(10).max() < 5 : return ""
     if amount < 2 : return ""
-    
-    hf          = getMinuteData(code, name, '30min')
-    procMacdData(hf)
-    if hf.dif.iloc[-1] < 0 : return ""
-    if hf.dif.iloc[-1] < hf.dea.iloc[-1] : return ""
-    sta         = list(hf.cross.where(hf.cross == 1).dropna().index)
-    if len(sta) == 0 : return ""
-
-    P0          = sta[-1]
-    grow        = round(close[-1] / hf.close.iloc[P0], 2)
-    gaps        = hf.index[-1] - P0
     if grow > 2: return ""
     
-    adj         = list(hf.cross.iloc[P0:].where(hf.cross == -1).dropna().index)
-    if len(adj) == 0 : 
-        info    = str(qos) + "9  " + str(change).rjust(5) + "%"
-        if df.tur.iloc[-1] == 0 : return ""
-    else :
-        info    = str(qos) + "8  " + str(change).rjust(5) + "%"
-        P1      = adj[0]
-        hmin    = hf.dif.iloc[P1:].min()
-        gaps    = hf.index[-1] - P1
-        if hmin < 0 : return ""
-    
-    if info == "" : return ""
+    qt          = getMinuteData(code, name, tp)
+    procMacdData(qt)
+    if qt.dif.iloc[-1] < 0 : return ""
+    sta         = list(qt.cross.where(qt.cross == 1).dropna().index)
+    if len(sta) == 0 : return ""
+    P0          = sta[-1]
+    adj         = list(qt.cross.iloc[P0:].where(qt.cross == -1).dropna().index)
+    if len(adj) == 0 : return ""
+    mcls        = [qt.close.iloc[i] for i in adj]
+    P1          = adj[mcls.index(max(mcls))]
+    mdea        = qt.dea.iloc[P1:].min()
+    gaps        = qt.index[-1] - P1
+    if mdea < 0 : return ""
+    if not (qt.close.iloc[-1] >= qt.close.iloc[P1-1] * 1.01\
+        or (qt.close.iloc[-1] >= qt.close.iloc[P1-1] and qt.dif.iloc[-1] >= qt.dea.iloc[-1])) : return ""
     if True:
-        result  = [True, code, name.rjust(4), hf.close.iloc[P0], str(amount)+"亿", close[-1], grow, gaps, info]
+        #print(code, name, qt.close.iloc[-1]/max(mcls))
+        info    = str(qos) + "9  " + str(change).rjust(5) + "%"
+        result  = [True, code, name.rjust(4), qt.close.iloc[P1], str(amount)+"亿", close[-1], grow, gaps, info]
         return result
     return ""
 def findRighSideGrow4(code, name, testFlag, df, qos):
@@ -693,8 +731,11 @@ def findPlateWeekMacd(code, name, testFlag, df, wk, qos):
 def strClose(close):
     return str(close).rjust(6)
 def getMinuteData(code, name, tp):
-    # loca    = "SH" if code[0] == "6" else "SZ"
-    ifile   = minipath + code
+    if code[0] != "S":
+        loca    = "SH" if code[0] == "6" else "SZ"
+        ifile   = minipath + loca + code
+    else:
+        ifile   = minipath + code
     if not os.path.exists(ifile):
         print(ifile, "not find")
         sys.exit(0)

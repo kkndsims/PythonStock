@@ -23,11 +23,11 @@ if __name__ == '__main__' :
     if enPlat : getPlatImage(endDate, testList)     #板块买点
 
     #testList            = ['SH605336']     #上证
-    #testList            = ['SZ300927']     #深证
+    #testList            = ['SZ300322']     #深证
     getStockImage(endDate, testList)        #个股买点
       
     sendFlag            = True
-    sendFlag            = False
+    #sendFlag            = False
     if sendFlag and len(testList) == 0 :
         print("\n%s :: line %3d : ############### 发送邮件 ###############"\
         %("comDef", sys._getframe().f_lineno))            
